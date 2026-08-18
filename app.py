@@ -4,7 +4,7 @@ import io
 import ipaddress
 import re
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -33,29 +33,56 @@ st.set_page_config(page_title="Snoopy 2.0 | PDF bancario → Excel", page_icon="
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap');
+:root { --navy:#061525; --panel:#0a2139; --cyan:#48d7d0; --blue:#1597d5; --line:#245573; --muted:#9eb4c8; }
 html, body, [class*="css"] { font-family:Inter,sans-serif; }
-[data-testid="stAppViewContainer"] { background:linear-gradient(145deg,#061525,#0a2139 55%,#071827); color:#eef6ff; }
+[data-testid="stAppViewContainer"] { background:
+ linear-gradient(rgba(34,86,119,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(34,86,119,.055) 1px,transparent 1px),
+ radial-gradient(circle at 88% 3%,rgba(12,152,178,.18),transparent 25%),linear-gradient(145deg,#051321,#09213a 58%,#061725);
+ background-size:38px 38px,38px 38px,auto,auto; color:#eef6ff; }
 [data-testid="stSidebar"] { background:#061321; border-right:1px solid #1d4463; }
 [data-testid="stHeader"] { background:transparent; }
-.block-container { max-width:1500px; padding-top:1.25rem; }
-.hero { padding:1.55rem 1.75rem; border-radius:18px; border:1px solid #235577;
- background:radial-gradient(circle at 87% 18%,rgba(16,163,184,.30),transparent 32%),linear-gradient(135deg,#0b2842,#0a1d32);
- box-shadow:0 18px 55px rgba(0,0,0,.27); margin-bottom:1rem; }
-.hero h1 { margin:.25rem 0 .45rem; color:#fff; font-size:2.05rem; }
-.hero p { margin:0; color:#b7cadb; max-width:950px; }
+.block-container { max-width:1500px; padding-top:1rem; }
+.hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2rem; align-items:center; padding:1.6rem 1.75rem;
+ border-radius:20px; border:1px solid #28617f; background:radial-gradient(circle at 83% 18%,rgba(24,184,190,.26),transparent 34%),linear-gradient(135deg,rgba(12,44,72,.98),rgba(7,27,47,.98));
+ box-shadow:0 22px 60px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05); margin-bottom:1rem; overflow:hidden; }
+.hero h1 { margin:.28rem 0 .5rem; color:#fff; font-size:clamp(1.75rem,3vw,2.45rem); letter-spacing:-.035em; }
+.hero p { margin:0; color:#b7cadb; max-width:900px; }
 .eyebrow { color:#50d3c8; font-size:.76rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+.brand-lockup { min-width:225px; padding:.9rem 1.05rem; border:1px solid rgba(91,218,215,.35); border-radius:16px;
+ background:rgba(4,20,35,.52); text-align:right; box-shadow:inset 0 0 28px rgba(31,181,188,.07); }
+.brand-name { font:600 1.28rem 'IBM Plex Mono',monospace; color:#fff; letter-spacing:.055em; }
+.brand-author { margin-top:.28rem; color:#58d9d0; font:600 .76rem 'IBM Plex Mono',monospace; }
+.brand-status { margin-top:.65rem; color:#9fb6c9; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
 .badge { display:inline-block; margin:.9rem .4rem 0 0; padding:.3rem .62rem; border-radius:999px; font-size:.72rem;
  background:#123451; border:1px solid #2b688e; color:#e3f3ff; }
+.legal-title { color:#f2c65c; font:600 .72rem 'IBM Plex Mono',monospace; letter-spacing:.12em; text-transform:uppercase; margin-bottom:.45rem; }
 .legal { margin-top:1.5rem; padding:1rem 1.2rem; border-radius:12px; border-left:4px solid #d6aa47;
  background:#13263c; color:#b7c7d8; font-size:.78rem; line-height:1.55; }
 .author { color:#fff; font-weight:700; }
-[data-testid="stMetric"] { background:#0c263f; border:1px solid #235274; border-radius:14px; padding:.8rem 1rem; }
+.status-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; margin:.4rem 0 1rem; }
+.status-card { position:relative; padding:.82rem 1rem; border-radius:14px; border:1px solid rgba(52,110,144,.7);
+ background:linear-gradient(145deg,rgba(13,43,68,.92),rgba(7,29,49,.92)); overflow:hidden; }
+.status-card:before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:linear-gradient(#47ddd2,#1597d5); }
+.status-label { color:#8faabd; font:600 .64rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
+.status-value { margin-top:.28rem; color:#f7fbff; font-size:1.08rem; font-weight:750; }
+.status-note { color:#6edfd7; font-size:.68rem; margin-top:.18rem; }
+.kpi-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; margin:1rem 0; }
+.kpi { padding:1rem 1.05rem; border-radius:15px; border:1px solid #285a78; background:linear-gradient(145deg,#0d2b46,#081e33);
+ box-shadow:0 12px 30px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.04); }
+.kpi-label { color:#94aec2; font:600 .65rem 'IBM Plex Mono',monospace; letter-spacing:.09em; text-transform:uppercase; }
+.kpi-value { color:#fff; font-size:1.34rem; font-weight:800; margin-top:.35rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.kpi-accent { height:2px; width:34px; margin-top:.65rem; background:linear-gradient(90deg,#4bdbd2,#168ec8); border-radius:3px; }
 [data-testid="stFileUploader"] { background:#0b233a; border:1px dashed #37779d; border-radius:14px; padding:.5rem; }
+.stTextInput input, [data-baseweb="select"] > div { border-radius:10px !important; }
+.login-shell { padding:.2rem .25rem .8rem; }
+.login-kicker { color:#52d8cf; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; }
 .stButton>button, .stDownloadButton>button { border-radius:9px; font-weight:700; min-height:2.65rem; }
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {
  background:linear-gradient(90deg,#087ebc,#0da69c); color:#fff; border:0; }
 hr { border-color:#20425d; }
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -67,6 +94,31 @@ def now_ar() -> datetime:
 def period_label() -> str:
     value = now_ar()
     return f"{MONTHS[value.month]} {value.year}"
+
+
+def business_days_to_year_end() -> int:
+    current = now_ar().date()
+    end = date(current.year, 12, 31)
+    if current > end:
+        return 0
+    days = 0
+    cursor = current + timedelta(days=1)
+    while cursor <= end:
+        if cursor.weekday() < 5:
+            days += 1
+        cursor += timedelta(days=1)
+    return days
+
+
+def hero(subtitle: str) -> None:
+    st.markdown(f"""
+    <div class="hero">
+      <div><div class="eyebrow">Intelligence workspace · Uso educativo</div>
+      <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p></div>
+      <div class="brand-lockup"><div class="brand-name">SNOOPY 2.0</div>
+      <div class="brand-author">{AUTHOR} · CORRIENTES</div>
+      <div class="brand-status">● Sistema operativo · 7 bancos</div></div>
+    </div>""", unsafe_allow_html=True)
 
 
 def money_ar(value: float) -> str:
@@ -157,20 +209,23 @@ def authenticate(username: str, password: str):
 
 def academic_notice() -> None:
     st.markdown(f"""
-    <div class="legal"><span class="author">Autoría: {AUTHOR} · {period_label()}</span><br>
+    <div class="legal"><div class="legal-title">Descargo de responsabilidad</div>
+    <span class="author">Autoría: {AUTHOR} · {period_label()}</span><br>
     <b>Emprendedurismo (IA) - Corrientes · {APP_VERSION} · USO EXCLUSIVAMENTE EDUCATIVO</b><br><br>
     {DISCLAIMER}</div>""", unsafe_allow_html=True)
 
 
 def login_screen() -> None:
-    st.markdown(f"""
-    <div class="hero"><div class="eyebrow">{APP_VERSION} · Uso exclusivamente educativo</div>
-    <h1>PDF bancario → Excel normalizado</h1>
-    <p>Extractor y herramienta de fiscalización académica. Emprendedurismo (IA) - Corrientes.</p></div>
-    """, unsafe_allow_html=True)
+    hero("Extractor y herramienta de fiscalización académica. Emprendedurismo (IA) · Corrientes.")
+    st.markdown(f"""<div class="status-grid">
+      <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">7 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
+      <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
+      <div class="status-card"><div class="status-label">Ciclo {now_ar().year}</div><div class="status-value">{business_days_to_year_end()} días hábiles</div><div class="status-note">Hasta el cierre anual</div></div>
+    </div>""", unsafe_allow_html=True)
     _, center, _ = st.columns([1, 1.15, 1])
     with center:
         with st.container(border=True):
+            st.markdown('<div class="login-kicker">Acceso seguro · Control de usuarios</div>', unsafe_allow_html=True)
             st.subheader("Ingreso de usuarios")
             username = st.text_input("Usuario").strip().lower()
             password = st.text_input("Clave", type="password")
@@ -269,15 +324,24 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
 
 
 def extractor_page() -> None:
-    st.markdown(f"""
-    <div class="hero"><div class="eyebrow">{APP_VERSION} · Uso exclusivamente educativo</div>
-    <h1>PDF bancario → Excel normalizado</h1>
-    <p>Conversión prioritaria y análisis fiscalizador de acreditaciones, CUIT, fecha, monto y procedencia.</p>
-    <span class="badge">BTF</span><span class="badge">Patagonia</span><span class="badge">BBVA</span><span class="badge">Comafi</span>
-    <span class="badge">Macro</span><span class="badge">Galicia</span><span class="badge">HSBC</span></div>
-    """, unsafe_allow_html=True)
+    hero("Conversión prioritaria y análisis fiscalizador de acreditaciones, CUIT, fecha, monto y procedencia.")
+    if "conversions_session" not in st.session_state:
+        st.session_state.conversions_session = 0
+    st.markdown(f"""<div class="status-grid">
+      <div class="status-card"><div class="status-label">Sesión actual</div><div class="status-value">{st.session_state.conversions_session} PDF procesados</div><div class="status-note">Sin persistencia documental</div></div>
+      <div class="status-card"><div class="status-label">Seguridad</div><div class="status-value">Usuario autenticado</div><div class="status-note">Acceso y actividad registrados</div></div>
+      <div class="status-card"><div class="status-label">Cierre {now_ar().year}</div><div class="status-value">{business_days_to_year_end()} días hábiles</div><div class="status-note">Restantes hasta el 31/12</div></div>
+    </div>""", unsafe_allow_html=True)
     bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC"])
     uploaded = st.file_uploader("Seleccionar un extracto PDF", type=["pdf"], accept_multiple_files=False)
+    upload_token = (uploaded.name, uploaded.size) if uploaded else None
+    previous_token = st.session_state.get("active_upload")
+    if previous_token and upload_token != previous_token:
+        st.session_state.pop("result", None)
+        st.session_state.pop("downloads", None)
+        st.session_state.pop("active_upload", None)
+        if uploaded is None:
+            st.toast("PDF retirado: datos y descargas eliminados de la sesión.", icon="🧹")
     if uploaded and st.button("Convertir extracto", type="primary", width="stretch"):
         with st.spinner("Extrayendo y normalizando movimientos página por página…"):
             try:
@@ -297,7 +361,10 @@ def extractor_page() -> None:
                     dropna=False, as_index=False
                 ).agg(Acreditaciones=("Crédito", "size"), Total_acreditado=("Crédito", "sum")).sort_values("Total_acreditado", ascending=False)
                 st.session_state.result = (uploaded.name, bank, full, credits, grouped, monthly, rejected)
+                st.session_state.active_upload = upload_token
+                st.session_state.conversions_session += 1
                 st.session_state.pop("downloads", None)
+                log_access(st.session_state.user["username"], True, "PDF_PROCESSED")
             except MemoryError:
                 st.error("El servidor agotó memoria. El proceso se detuvo de forma controlada; probá dividir el PDF por períodos.")
             except Exception as exc:
@@ -307,12 +374,15 @@ def extractor_page() -> None:
         academic_notice()
         return
     _, bank, full, credits, grouped, monthly, rejected = st.session_state.result
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Banco", bank)
-    c2.metric("Movimientos", f"{len(full):,}".replace(",", "."))
-    c3.metric("Acreditaciones", f"{len(credits):,}".replace(",", "."))
     total_credits = credits["Crédito"].sum()
-    c4.metric("Total acreditado", money_ar(total_credits), help=f"Importe exacto: {money_ar(total_credits)}")
+    movement_count = f"{len(full):,}".replace(",", ".")
+    credit_count = f"{len(credits):,}".replace(",", ".")
+    st.markdown(f"""<div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">Entidad detectada</div><div class="kpi-value">{bank}</div><div class="kpi-accent"></div></div>
+      <div class="kpi"><div class="kpi-label">Movimientos</div><div class="kpi-value">{movement_count}</div><div class="kpi-accent"></div></div>
+      <div class="kpi"><div class="kpi-label">Acreditaciones</div><div class="kpi-value">{credit_count}</div><div class="kpi-accent"></div></div>
+      <div class="kpi"><div class="kpi-label">Total acreditado</div><div class="kpi-value" title="{money_ar(total_credits)}">{money_ar(total_credits)}</div><div class="kpi-accent"></div></div>
+    </div>""", unsafe_allow_html=True)
     tabs = st.tabs(["Movimientos", "Fiscalización de créditos", "Agrupaciones", "Control", "Descargas"])
     with tabs[0]:
         preview = full.head(2000)
