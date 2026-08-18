@@ -16,7 +16,7 @@ from parsers import parse_pdf
 
 
 APP_VERSION = "Snoopy 2.0"
-AUTHOR = "@PamperoSur (CAF)"
+AUTHOR = "@PamperoSur"
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 MONTHS = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -78,7 +78,7 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .stTextInput input, [data-baseweb="select"] > div { border-radius:10px !important; }
 .login-shell { padding:.2rem .25rem .8rem; }
 .login-kicker { color:#52d8cf; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; }
-.excel-visual { position:relative; min-height:355px; border-radius:18px; border:1px solid #285b79; overflow:hidden;
+.excel-visual { position:relative; min-height:520px; height:100%; border-radius:18px; border:1px solid #285b79; overflow:hidden;
  background:radial-gradient(circle at 50% 38%,rgba(31,190,185,.17),transparent 48%),linear-gradient(145deg,#0c2943,#071c30); padding:1rem; }
 .excel-visual:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent 52%,rgba(7,28,48,.95) 96%); pointer-events:none; }
 .doc-tag { color:#66ddd5; font:600 .66rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
@@ -89,16 +89,29 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .sheet-row span { padding:.48rem .42rem; border-right:1px solid rgba(56,105,131,.5); border-top:1px solid rgba(56,105,131,.42);
  color:#aec6d7; font:500 .52rem 'IBM Plex Mono',monospace; white-space:nowrap; overflow:hidden; }
 .flow-arrow { position:absolute; right:5%; bottom:9%; color:#65e3d9; font:600 .66rem 'IBM Plex Mono',monospace; letter-spacing:.08em; z-index:2; }
-.side-disclaimer { min-height:355px; padding:1rem 1.05rem; border-radius:18px; border:1px solid #665631; border-top:3px solid #e2b950;
+.side-disclaimer { min-height:520px; height:100%; padding:1rem 1.05rem; border-radius:18px; border:1px solid #665631; border-top:3px solid #e2b950;
  background:linear-gradient(165deg,rgba(40,47,54,.94),rgba(18,35,51,.96)); color:#afc0cf; font-size:.72rem; line-height:1.52; }
 .side-disclaimer .legal-title { margin-bottom:.7rem; }
 .side-disclaimer strong { color:#fff; }
 .side-disclaimer .legal-meta { margin-top:.8rem; padding-top:.7rem; border-top:1px solid rgba(222,188,88,.25); color:#e9c968; font-size:.66rem; }
+.world-banner { position:relative; margin-top:.8rem; height:76px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
+ background:linear-gradient(180deg,rgba(101,190,225,.17) 0 33%,rgba(238,248,252,.10) 33% 66%,rgba(101,190,225,.17) 66%);
+ box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.14); }
+.world-banner:before,.world-banner:after { content:""; position:absolute; top:0; bottom:0; width:90px; z-index:2; pointer-events:none; }
+.world-banner:before { left:0; background:linear-gradient(90deg,#082039,transparent); }
+.world-banner:after { right:0; background:linear-gradient(-90deg,#082039,transparent); }
+.world-track { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; animation:champions 8s ease-in-out infinite alternate; }
+.champions { display:flex; align-items:center; gap:1.8rem; white-space:nowrap; }
+.champion-title { color:#dcecf5; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.14em; }
+.star-block { display:flex; align-items:center; gap:.45rem; color:#f0c75b; }
+.star { font-size:1.75rem; line-height:1; filter:drop-shadow(0 0 7px rgba(240,199,91,.35)); }
+.star-year { color:#f3d77f; font:600 .67rem 'IBM Plex Mono',monospace; }
+@keyframes champions { from { transform:translateX(-9%); } to { transform:translateX(9%); } }
 .stButton>button, .stDownloadButton>button { border-radius:9px; font-weight:700; min-height:2.65rem; }
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {
  background:linear-gradient(90deg,#087ebc,#0da69c); color:#fff; border:0; }
 hr { border-color:#20425d; }
-@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:280px}}
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:360px}.world-track{animation:none}}
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
@@ -240,15 +253,26 @@ def side_disclaimer() -> None:
     </div>""", unsafe_allow_html=True)
 
 
+def champions_banner() -> None:
+    st.markdown("""
+    <div class="world-banner"><div class="world-track"><div class="champions">
+      <div class="champion-title">ARGENTINA · TRES VECES CAMPEÓN DEL MUNDO</div>
+      <div class="star-block"><span class="star">★</span><span class="star-year">1978</span></div>
+      <div class="star-block"><span class="star">★</span><span class="star-year">1986</span></div>
+      <div class="star-block"><span class="star">★</span><span class="star-year">2022</span></div>
+      <div class="champion-title">ORGULLO · HISTORIA · IDENTIDAD</div>
+    </div></div></div>""", unsafe_allow_html=True)
+
+
 def login_screen() -> None:
-    hero("Extractor y herramienta de fiscalización académica. Emprendedurismo (IA) · Corrientes.")
+    hero("Extractor y herramienta de uso contable académico. Emprendedurismo (IA) · Corrientes.")
     st.markdown(f"""<div class="status-grid">
       <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">7 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
       <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
       <div class="status-card"><div class="status-label">Robustez</div><div class="status-value">PDF de gran volumen</div><div class="status-note">Procesamiento página por página</div></div>
       <div class="status-card"><div class="status-label">Fiabilidad</div><div class="status-value">Salida normalizada</div><div class="status-note">Excel, CSV y control de filas</div></div>
     </div>""", unsafe_allow_html=True)
-    visual, center, legal = st.columns([1.02, 1.16, .88], gap="medium")
+    visual, center, legal = st.columns(3, gap="medium")
     with visual:
         excel_preview()
     with center:
@@ -273,6 +297,7 @@ def login_screen() -> None:
                     st.error(f"No fue posible conectar con la base de usuarios: {exc}")
     with legal:
         side_disclaimer()
+    champions_banner()
 
 
 def classify_origin(text: str) -> str:
