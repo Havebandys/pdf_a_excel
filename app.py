@@ -78,7 +78,8 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .stTextInput input, [data-baseweb="select"] > div { border-radius:10px !important; }
 .login-shell { padding:.2rem .25rem .8rem; }
 .login-kicker { color:#52d8cf; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; }
-.excel-visual { position:relative; min-height:520px; height:100%; border-radius:18px; border:1px solid #285b79; overflow:hidden;
+.login-note { color:#849db1; font-size:.68rem; line-height:1.35; margin:.05rem 0 .15rem; }
+.excel-visual { position:relative; min-height:430px; height:100%; border-radius:18px; border:1px solid #285b79; overflow:hidden;
  background:radial-gradient(circle at 50% 38%,rgba(31,190,185,.17),transparent 48%),linear-gradient(145deg,#0c2943,#071c30); padding:1rem; }
 .excel-visual:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent 52%,rgba(7,28,48,.95) 96%); pointer-events:none; }
 .doc-tag { color:#66ddd5; font:600 .66rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
@@ -89,12 +90,12 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .sheet-row span { padding:.48rem .42rem; border-right:1px solid rgba(56,105,131,.5); border-top:1px solid rgba(56,105,131,.42);
  color:#aec6d7; font:500 .52rem 'IBM Plex Mono',monospace; white-space:nowrap; overflow:hidden; }
 .flow-arrow { position:absolute; right:5%; bottom:9%; color:#65e3d9; font:600 .66rem 'IBM Plex Mono',monospace; letter-spacing:.08em; z-index:2; }
-.side-disclaimer { min-height:520px; height:100%; padding:1rem 1.05rem; border-radius:18px; border:1px solid #665631; border-top:3px solid #e2b950;
+.side-disclaimer { min-height:430px; height:100%; padding:.82rem .95rem; border-radius:18px; border:1px solid #665631; border-top:3px solid #e2b950;
  background:linear-gradient(165deg,rgba(40,47,54,.94),rgba(18,35,51,.96)); color:#afc0cf; font-size:.72rem; line-height:1.52; }
-.side-disclaimer .legal-title { margin-bottom:.7rem; }
+.side-disclaimer .legal-title { margin-bottom:.48rem; }
 .side-disclaimer strong { color:#fff; }
-.side-disclaimer .legal-meta { margin-top:.8rem; padding-top:.7rem; border-top:1px solid rgba(222,188,88,.25); color:#e9c968; font-size:.66rem; }
-.world-banner { position:relative; margin-top:.8rem; height:76px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
+.side-disclaimer .legal-meta { margin-top:.55rem; padding-top:.5rem; border-top:1px solid rgba(222,188,88,.25); color:#e9c968; font-size:.64rem; }
+.world-banner { position:relative; margin-top:.5rem; height:66px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
  background:linear-gradient(180deg,rgba(101,190,225,.17) 0 33%,rgba(238,248,252,.10) 33% 66%,rgba(101,190,225,.17) 66%);
  box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.14); }
 .world-banner:before,.world-banner:after { content:""; position:absolute; top:0; bottom:0; width:90px; z-index:2; pointer-events:none; }
@@ -111,7 +112,7 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {
  background:linear-gradient(90deg,#087ebc,#0da69c); color:#fff; border:0; }
 hr { border-color:#20425d; }
-@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:360px}.world-track{animation:none}}
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}}
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
@@ -284,7 +285,7 @@ def login_screen() -> None:
             accepted = st.checkbox(
                 "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso."
             )
-            st.caption("Se registra usuario, fecha, hora, IP, información técnica y ubicación aproximada con fines de seguridad y administración académica.")
+            st.markdown('<div class="login-note">Registro de acceso: usuario, fecha, hora, IP y ubicación aproximada.</div>', unsafe_allow_html=True)
             if st.button("Ingresar", type="primary", width="stretch", disabled=not accepted):
                 try:
                     user = authenticate(username, password)
