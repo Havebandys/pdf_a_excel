@@ -4,7 +4,7 @@ import io
 import ipaddress
 import re
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -16,7 +16,7 @@ from parsers import parse_pdf
 
 
 APP_VERSION = "Snoopy 2.0"
-AUTHOR = "@CAF"
+AUTHOR = "@PamperoSur (CAF)"
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 MONTHS = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -51,16 +51,17 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .eyebrow { color:#50d3c8; font-size:.76rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
 .brand-lockup { min-width:225px; padding:.9rem 1.05rem; border:1px solid rgba(91,218,215,.35); border-radius:16px;
  background:rgba(4,20,35,.52); text-align:right; box-shadow:inset 0 0 28px rgba(31,181,188,.07); }
-.brand-name { font:600 1.28rem 'IBM Plex Mono',monospace; color:#fff; letter-spacing:.055em; }
-.brand-author { margin-top:.28rem; color:#58d9d0; font:600 .76rem 'IBM Plex Mono',monospace; }
-.brand-status { margin-top:.65rem; color:#9fb6c9; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
+.brand-name { font:800 1.85rem 'IBM Plex Mono',monospace; letter-spacing:.055em;
+ background:linear-gradient(90deg,#56e4d9,#56b9ff); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.brand-author { margin-top:.32rem; color:#fff; font:600 .76rem 'IBM Plex Mono',monospace; }
+.brand-status { margin-top:.65rem; color:#72ddd6; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
 .badge { display:inline-block; margin:.9rem .4rem 0 0; padding:.3rem .62rem; border-radius:999px; font-size:.72rem;
  background:#123451; border:1px solid #2b688e; color:#e3f3ff; }
 .legal-title { color:#f2c65c; font:600 .72rem 'IBM Plex Mono',monospace; letter-spacing:.12em; text-transform:uppercase; margin-bottom:.45rem; }
 .legal { margin-top:1.5rem; padding:1rem 1.2rem; border-radius:12px; border-left:4px solid #d6aa47;
  background:#13263c; color:#b7c7d8; font-size:.78rem; line-height:1.55; }
 .author { color:#fff; font-weight:700; }
-.status-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; margin:.4rem 0 1rem; }
+.status-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.68rem; margin:.35rem 0 .85rem; }
 .status-card { position:relative; padding:.82rem 1rem; border-radius:14px; border:1px solid rgba(52,110,144,.7);
  background:linear-gradient(145deg,rgba(13,43,68,.92),rgba(7,29,49,.92)); overflow:hidden; }
 .status-card:before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:linear-gradient(#47ddd2,#1597d5); }
@@ -77,11 +78,27 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .stTextInput input, [data-baseweb="select"] > div { border-radius:10px !important; }
 .login-shell { padding:.2rem .25rem .8rem; }
 .login-kicker { color:#52d8cf; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; }
+.excel-visual { position:relative; min-height:355px; border-radius:18px; border:1px solid #285b79; overflow:hidden;
+ background:radial-gradient(circle at 50% 38%,rgba(31,190,185,.17),transparent 48%),linear-gradient(145deg,#0c2943,#071c30); padding:1rem; }
+.excel-visual:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent 52%,rgba(7,28,48,.95) 96%); pointer-events:none; }
+.doc-tag { color:#66ddd5; font:600 .66rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
+.sheet { position:absolute; left:9%; top:18%; width:82%; transform:perspective(700px) rotateY(8deg) rotate(-1.5deg);
+ border:1px solid rgba(111,213,209,.45); border-radius:10px; background:rgba(9,35,57,.88); box-shadow:0 24px 45px rgba(0,0,0,.34); overflow:hidden; }
+.sheet-head,.sheet-row { display:grid; grid-template-columns:.7fr 1.65fr .8fr .8fr; }
+.sheet-head span { padding:.55rem .42rem; background:#0e806f; color:#eafffd; font:600 .54rem 'IBM Plex Mono',monospace; }
+.sheet-row span { padding:.48rem .42rem; border-right:1px solid rgba(56,105,131,.5); border-top:1px solid rgba(56,105,131,.42);
+ color:#aec6d7; font:500 .52rem 'IBM Plex Mono',monospace; white-space:nowrap; overflow:hidden; }
+.flow-arrow { position:absolute; right:5%; bottom:9%; color:#65e3d9; font:600 .66rem 'IBM Plex Mono',monospace; letter-spacing:.08em; z-index:2; }
+.side-disclaimer { min-height:355px; padding:1rem 1.05rem; border-radius:18px; border:1px solid #665631; border-top:3px solid #e2b950;
+ background:linear-gradient(165deg,rgba(40,47,54,.94),rgba(18,35,51,.96)); color:#afc0cf; font-size:.72rem; line-height:1.52; }
+.side-disclaimer .legal-title { margin-bottom:.7rem; }
+.side-disclaimer strong { color:#fff; }
+.side-disclaimer .legal-meta { margin-top:.8rem; padding-top:.7rem; border-top:1px solid rgba(222,188,88,.25); color:#e9c968; font-size:.66rem; }
 .stButton>button, .stDownloadButton>button { border-radius:9px; font-weight:700; min-height:2.65rem; }
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {
  background:linear-gradient(90deg,#087ebc,#0da69c); color:#fff; border:0; }
 hr { border-color:#20425d; }
-@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:280px}}
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
@@ -96,28 +113,14 @@ def period_label() -> str:
     return f"{MONTHS[value.month]} {value.year}"
 
 
-def business_days_to_year_end() -> int:
-    current = now_ar().date()
-    end = date(current.year, 12, 31)
-    if current > end:
-        return 0
-    days = 0
-    cursor = current + timedelta(days=1)
-    while cursor <= end:
-        if cursor.weekday() < 5:
-            days += 1
-        cursor += timedelta(days=1)
-    return days
-
-
 def hero(subtitle: str) -> None:
     st.markdown(f"""
     <div class="hero">
       <div><div class="eyebrow">Intelligence workspace · Uso educativo</div>
       <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p></div>
       <div class="brand-lockup"><div class="brand-name">SNOOPY 2.0</div>
-      <div class="brand-author">{AUTHOR} · CORRIENTES</div>
-      <div class="brand-status">● Sistema operativo · 7 bancos</div></div>
+      <div class="brand-author">X: @PamperoSur · CAF</div>
+      <div class="brand-status">{period_label()} · Corrientes</div></div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -215,14 +218,39 @@ def academic_notice() -> None:
     {DISCLAIMER}</div>""", unsafe_allow_html=True)
 
 
+def excel_preview() -> None:
+    st.markdown("""
+    <div class="excel-visual"><div class="doc-tag">PDF RAW DATA → EXCEL</div>
+      <div class="sheet">
+        <div class="sheet-head"><span>FECHA</span><span>CONCEPTO</span><span>CRÉDITO</span><span>DÉBITO</span></div>
+        <div class="sheet-row"><span>03/08</span><span>TRANSFERENCIA CUIT 20...</span><span>125.000</span><span>—</span></div>
+        <div class="sheet-row"><span>05/08</span><span>DEPÓSITO EFECTIVO</span><span>82.500</span><span>—</span></div>
+        <div class="sheet-row"><span>11/08</span><span>PAGO PROVEEDOR</span><span>—</span><span>43.200</span></div>
+        <div class="sheet-row"><span>18/08</span><span>TRANSFERENCIA RECIBIDA</span><span>310.800</span><span>—</span></div>
+        <div class="sheet-row"><span>22/08</span><span>IMPUESTO DÉB./CRÉD.</span><span>—</span><span>1.865</span></div>
+      </div><div class="flow-arrow">NORMALIZADO ✓</div>
+    </div>""", unsafe_allow_html=True)
+
+
+def side_disclaimer() -> None:
+    st.markdown(f"""
+    <div class="side-disclaimer"><div class="legal-title">Descargo de responsabilidad</div>
+      <strong>Uso exclusivamente educativo.</strong><br><br>{DISCLAIMER}
+      <div class="legal-meta">AUTORÍA · {AUTHOR}<br>{period_label()} · CORRIENTES<br>{APP_VERSION}</div>
+    </div>""", unsafe_allow_html=True)
+
+
 def login_screen() -> None:
     hero("Extractor y herramienta de fiscalización académica. Emprendedurismo (IA) · Corrientes.")
     st.markdown(f"""<div class="status-grid">
       <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">7 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
       <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
-      <div class="status-card"><div class="status-label">Ciclo {now_ar().year}</div><div class="status-value">{business_days_to_year_end()} días hábiles</div><div class="status-note">Hasta el cierre anual</div></div>
+      <div class="status-card"><div class="status-label">Robustez</div><div class="status-value">PDF de gran volumen</div><div class="status-note">Procesamiento página por página</div></div>
+      <div class="status-card"><div class="status-label">Fiabilidad</div><div class="status-value">Salida normalizada</div><div class="status-note">Excel, CSV y control de filas</div></div>
     </div>""", unsafe_allow_html=True)
-    _, center, _ = st.columns([1, 1.15, 1])
+    visual, center, legal = st.columns([1.02, 1.16, .88], gap="medium")
+    with visual:
+        excel_preview()
     with center:
         with st.container(border=True):
             st.markdown('<div class="login-kicker">Acceso seguro · Control de usuarios</div>', unsafe_allow_html=True)
@@ -243,7 +271,8 @@ def login_screen() -> None:
                         st.error("Usuario, clave o estado incorrecto.")
                 except Exception as exc:
                     st.error(f"No fue posible conectar con la base de usuarios: {exc}")
-    academic_notice()
+    with legal:
+        side_disclaimer()
 
 
 def classify_origin(text: str) -> str:
@@ -330,7 +359,7 @@ def extractor_page() -> None:
     st.markdown(f"""<div class="status-grid">
       <div class="status-card"><div class="status-label">Sesión actual</div><div class="status-value">{st.session_state.conversions_session} PDF procesados</div><div class="status-note">Sin persistencia documental</div></div>
       <div class="status-card"><div class="status-label">Seguridad</div><div class="status-value">Usuario autenticado</div><div class="status-note">Acceso y actividad registrados</div></div>
-      <div class="status-card"><div class="status-label">Cierre {now_ar().year}</div><div class="status-value">{business_days_to_year_end()} días hábiles</div><div class="status-note">Restantes hasta el 31/12</div></div>
+      <div class="status-card"><div class="status-label">Período operativo</div><div class="status-value">{period_label()}</div><div class="status-note">Actualización mensual automática</div></div>
     </div>""", unsafe_allow_html=True)
     bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC"])
     uploaded = st.file_uploader("Seleccionar un extracto PDF", type=["pdf"], accept_multiple_files=False)
@@ -505,7 +534,7 @@ if "user" not in st.session_state:
 user = st.session_state.user
 with st.sidebar:
     st.markdown("### Snoopy 2.0")
-    st.caption("Extractor Bancario IA · @CAF")
+    st.caption(f"Extractor Bancario IA · {AUTHOR}")
     st.caption(f"{user['full_name']} · {user['role']}")
     pages = ["Extractor"]
     if user["role"] == "Administrador":
