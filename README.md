@@ -1,9 +1,10 @@
-# Extractor Bancario IA - Beta educativa
+# Snoopy 2.0 — Extractor Bancario IA
 
-Aplicación web Streamlit para extraer movimientos de PDF de BTF, Banco Patagonia, BBVA y Banco Comafi.
+Aplicación web Streamlit para extraer movimientos de PDF de BTF, Banco Patagonia, BBVA,
+Banco Comafi, Banco Macro, Banco Galicia y HSBC.
 Procesa un documento por vez y genera archivos normalizados para Excel, Power BI y Google Sheets.
 
-**Autoría:** Profesor Carlos Freyberguer - Universidad del Litoral - Cátedra Emprendedurismo (IA).
+**Autoría:** @CAF.
 
 Beta de uso exclusivamente educativo. Prohibido su uso comercial.
 
@@ -29,17 +30,22 @@ Abrir `http://localhost:8501`.
 2. Subir el contenido de esta carpeta a la raíz del repositorio.
 3. Conectar GitHub con Streamlit Community Cloud.
 4. Crear una aplicación seleccionando el repositorio y `app.py` como archivo principal.
-5. En **Advanced settings > Secrets**, agregar `ACCESS_CODE = "1234"`.
+5. En **Advanced settings > Secrets**, agregar `SUPABASE_URL` y `SUPABASE_KEY`.
 6. Elegir la versión de Python y desplegar.
 
 `requirements.txt` instala todas las dependencias. No requiere Poppler, Homebrew ni ejecutables externos.
 No subir `.streamlit/secrets.toml`; la clave debe permanecer en los secretos privados de Streamlit.
 
-## Clave privada
+## Base de usuarios
 
-La clave inicial es `1234`. Para cambiarla sin modificar el código, configurar `ACCESS_CODE` en los
-secretos privados del servidor o la variable de entorno `EXTRACTOR_ACCESS_CODE`. No se debe publicar
-un archivo `secrets.toml` real en GitHub.
+La aplicación utiliza Supabase exclusivamente para usuarios, roles y registros de acceso. Los PDF y
+movimientos no se guardan. Configurar `SUPABASE_URL` y `SUPABASE_KEY` en los secretos privados.
+No se debe publicar un archivo `secrets.toml` real en GitHub.
+
+Usuarios iniciales creados por el script SQL:
+
+- `adm` / `1234`: Administrador.
+- `analista1` / `1234`: Analista.
 
 ## Privacidad
 
@@ -53,5 +59,6 @@ Streamlit también debe configurarse sin logs de contenido ni copias persistente
 - `Control`: cantidades y totales.
 - `Revisar`: líneas que requieren control manual.
 
-La primera versión está calibrada con los cuatro extractos modelo recibidos. Antes de usarla como
+Snoopy 2.0 está calibrado con los nueve extractos modelo recibidos. Los PDF se procesan página por
+página y las descargas se generan bajo demanda para reducir el uso de memoria. Antes de usarla como
 único respaldo contable se deben comparar los totales mensuales contra el resumen de cada banco.

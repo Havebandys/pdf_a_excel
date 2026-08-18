@@ -15,7 +15,8 @@ from supabase import Client, create_client
 from parsers import parse_pdf
 
 
-APP_VERSION = "Beta 2.0"
+APP_VERSION = "Snoopy 2.0"
+AUTHOR = "@CAF"
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 MONTHS = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -28,7 +29,7 @@ DISCLAIMER = (
     "extracción, interpretación o decisiones tomadas con la información procesada."
 )
 
-st.set_page_config(page_title="PDF bancario → Excel normalizado", page_icon="🏦", layout="wide")
+st.set_page_config(page_title="Snoopy 2.0 | PDF bancario → Excel", page_icon="🏦", layout="wide")
 
 st.markdown("""
 <style>
@@ -156,7 +157,7 @@ def authenticate(username: str, password: str):
 
 def academic_notice() -> None:
     st.markdown(f"""
-    <div class="legal"><span class="author">Autoría: Dr. CF · {period_label()}</span><br>
+    <div class="legal"><span class="author">Autoría: {AUTHOR} · {period_label()}</span><br>
     <b>Emprendedurismo (IA) - Corrientes · {APP_VERSION} · USO EXCLUSIVAMENTE EDUCATIVO</b><br><br>
     {DISCLAIMER}</div>""", unsafe_allow_html=True)
 
@@ -236,7 +237,7 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
     control = pd.DataFrame({"Control": ["Aplicación", "Finalidad", "Autoría", "Entorno", "Emisión",
                                                 "Banco", "Movimientos", "Acreditaciones", "Total acreditado", "Filas a revisar"],
                             "Resultado": [f"Extractor Bancario IA - {APP_VERSION}", "Uso exclusivamente educativo",
-                                          "Dr. CF", "Emprendedurismo (IA) - Corrientes", period_label(), bank,
+                                          AUTHOR, "Emprendedurismo (IA) - Corrientes", period_label(), bank,
                                           len(full), len(credits), credits["Crédito"].sum(), len(rejected)]})
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         full.to_excel(writer, sheet_name="Movimientos", index=False)
@@ -272,20 +273,33 @@ def extractor_page() -> None:
     <div class="hero"><div class="eyebrow">{APP_VERSION} · Uso exclusivamente educativo</div>
     <h1>PDF bancario → Excel normalizado</h1>
     <p>Conversión prioritaria y análisis fiscalizador de acreditaciones, CUIT, fecha, monto y procedencia.</p>
-    <span class="badge">BTF</span><span class="badge">Patagonia</span><span class="badge">BBVA</span><span class="badge">Comafi</span></div>
+    <span class="badge">BTF</span><span class="badge">Patagonia</span><span class="badge">BBVA</span><span class="badge">Comafi</span>
+    <span class="badge">Macro</span><span class="badge">Galicia</span><span class="badge">HSBC</span></div>
     """, unsafe_allow_html=True)
-    bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi"])
+    bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC"])
     uploaded = st.file_uploader("Seleccionar un extracto PDF", type=["pdf"], accept_multiple_files=False)
     if uploaded and st.button("Convertir extracto", type="primary", width="stretch"):
-        with st.spinner("Extrayendo y normalizando movimientos…"):
+        with st.spinner("Extrayendo y normalizando movimientos página por página…"):
             try:
-                bank, frame, rejected = parse_pdf(uploaded.getvalue(), bank_choice)
+                pdf_bytes = uploaded.getvalue()
+                if len(pdf_bytes) > 60 * 1024 * 1024:
+                    raise ValueError("El archivo supera el límite operativo de 60 MB.")
+                progress_bar = st.progress(0, text="Preparando el PDF…")
+                def update_progress(done: int, total: int) -> None:
+                    progress_bar.progress(done / total, text=f"Procesando página {done} de {total}")
+                bank, frame, rejected = parse_pdf(pdf_bytes, bank_choice, update_progress)
+                progress_bar.progress(1.0, text="Extracción terminada")
+                if frame.empty:
+                    raise ValueError(f"No se detectaron movimientos para el lector {bank}. Revisá la pestaña Control o elegí el banco manualmente.")
                 full, credits, monthly = fiscalize(frame)
                 grouped = credits.groupby(
                     ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
                     dropna=False, as_index=False
                 ).agg(Acreditaciones=("Crédito", "size"), Total_acreditado=("Crédito", "sum")).sort_values("Total_acreditado", ascending=False)
                 st.session_state.result = (uploaded.name, bank, full, credits, grouped, monthly, rejected)
+                st.session_state.pop("downloads", None)
+            except MemoryError:
+                st.error("El servidor agotó memoria. El proceso se detuvo de forma controlada; probá dividir el PDF por períodos.")
             except Exception as exc:
                 st.error(f"No se pudo convertir el PDF: {exc}")
     if "result" not in st.session_state:
@@ -301,7 +315,10 @@ def extractor_page() -> None:
     c4.metric("Total acreditado", money_ar(total_credits), help=f"Importe exacto: {money_ar(total_credits)}")
     tabs = st.tabs(["Movimientos", "Fiscalización de créditos", "Agrupaciones", "Control", "Descargas"])
     with tabs[0]:
-        st.dataframe(clean_view(full), hide_index=True, width="stretch")
+        preview = full.head(2000)
+        if len(full) > len(preview):
+            st.info(f"Vista optimizada: se muestran 2.000 de {len(full):,} movimientos. El Excel contiene el total.")
+        st.dataframe(clean_view(preview), hide_index=True, width="stretch")
     with tabs[1]:
         col1, col2, col3 = st.columns(3)
         min_amount = col1.number_input("Crédito mínimo", min_value=0.0, value=0.0, step=10000.0)
@@ -313,7 +330,10 @@ def extractor_page() -> None:
             view = view[mask]
         if origins:
             view = view[view["Procedencia"].isin(origins)]
-        st.dataframe(clean_view(view.sort_values("Crédito", ascending=False)), hide_index=True, width="stretch")
+        ordered = view.sort_values("Crédito", ascending=False)
+        if len(ordered) > 2000:
+            st.info(f"Se muestran las primeras 2.000 de {len(ordered):,} acreditaciones filtradas.")
+        st.dataframe(clean_view(ordered.head(2000)), hide_index=True, width="stretch")
     with tabs[2]:
         st.markdown("#### Por CUIT, persona, procedencia y banco receptor")
         st.dataframe(clean_view(grouped), hide_index=True, width="stretch")
@@ -326,12 +346,19 @@ def extractor_page() -> None:
             st.warning(f"Hay {len(rejected)} líneas que requieren control.")
             st.dataframe(rejected, hide_index=True, width="stretch")
     with tabs[4]:
-        book = export_workbook(bank, full, credits, grouped, monthly, rejected)
-        csv = credits.to_csv(index=False, sep=";", decimal=",", date_format="%d/%m/%Y").encode("utf-8-sig")
-        d1, d2 = st.columns(2)
-        d1.download_button("Descargar Excel fiscalizador", book, f"{bank.lower()}_fiscalizacion.xlsx",
-                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
-        d2.download_button("Descargar créditos CSV", csv, f"{bank.lower()}_creditos.csv", "text/csv", width="stretch")
+        st.caption("El archivo se prepara únicamente cuando lo solicitás, para reducir el uso de memoria del servidor.")
+        if st.button("Preparar archivos de descarga", type="primary", width="stretch"):
+            with st.spinner("Generando Excel y CSV…"):
+                st.session_state.downloads = (
+                    export_workbook(bank, full, credits, grouped, monthly, rejected),
+                    credits.to_csv(index=False, sep=";", decimal=",", date_format="%d/%m/%Y").encode("utf-8-sig"),
+                )
+        if "downloads" in st.session_state:
+            book, csv = st.session_state.downloads
+            d1, d2 = st.columns(2)
+            d1.download_button("Descargar Excel fiscalizador", book, f"{bank.lower()}_fiscalizacion.xlsx",
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
+            d2.download_button("Descargar créditos CSV", csv, f"{bank.lower()}_creditos.csv", "text/csv", width="stretch")
     academic_notice()
 
 
@@ -407,7 +434,8 @@ if "user" not in st.session_state:
 
 user = st.session_state.user
 with st.sidebar:
-    st.markdown("### Extractor Bancario IA")
+    st.markdown("### Snoopy 2.0")
+    st.caption("Extractor Bancario IA · @CAF")
     st.caption(f"{user['full_name']} · {user['role']}")
     pages = ["Extractor"]
     if user["role"] == "Administrador":
