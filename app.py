@@ -48,20 +48,21 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 [data-testid="stDecoration"], [data-testid="stStatusWidget"], #MainMenu, footer {
  display:none !important; visibility:hidden !important; height:0 !important; }
 .block-container { max-width:1500px; padding-top:0 !important; padding-bottom:.2rem !important; margin-top:-.45rem; }
-.hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2rem; align-items:center; padding:1.6rem 1.75rem;
+.hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2rem; align-items:stretch; padding:1.6rem 1.75rem;
  border-radius:20px; border:1px solid #28617f; background:radial-gradient(circle at 83% 18%,rgba(24,184,190,.26),transparent 34%),linear-gradient(135deg,rgba(12,44,72,.98),rgba(7,27,47,.98));
  box-shadow:0 22px 60px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05); margin-bottom:.55rem; overflow:hidden; }
 .hero h1 { margin:.28rem 0 .5rem; color:#fff; font-size:clamp(1.75rem,3vw,2.45rem); letter-spacing:-.035em; }
 .hero p { margin:0; color:#b7cadb; max-width:900px; }
 .eyebrow { color:#50d3c8; font-size:.76rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
-.brand-lockup { min-width:285px; align-self:end; padding:0 .15rem .1rem 0; text-align:right; background:transparent; border:0; }
+.brand-lockup { min-width:285px; align-self:stretch; display:flex; flex-direction:column; justify-content:flex-end; padding:0 .15rem .1rem 0; text-align:right; background:transparent; border:0; }
 .brand-name { font:800 clamp(1.85rem,2.55vw,2.55rem) 'IBM Plex Mono',monospace; letter-spacing:.075em; line-height:1;
  background:linear-gradient(105deg,#8ff8ef 0%,#48d7d0 38%,#55bfff 82%); -webkit-background-clip:text; background-clip:text; color:transparent;
  filter:drop-shadow(0 3px 10px rgba(0,0,0,.78)) drop-shadow(0 0 16px rgba(50,210,216,.18)); }
 .brand-author { margin-top:.48rem; color:#eaf8ff; font:600 .74rem 'IBM Plex Mono',monospace; letter-spacing:.045em;
  text-shadow:0 2px 8px rgba(0,0,0,.9); }
-.hero-copy { min-width:0; }
-.hero-meta { margin-top:.72rem; max-width:900px; color:#78ddd7; text-align:right;
+.hero-copy { min-width:0; display:flex; flex-direction:column; }
+.hero-copy p { margin-top:auto; padding-top:.8rem; }
+.hero-meta { margin-top:.48rem; color:#78ddd7; text-align:right;
  font:600 .64rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; text-shadow:0 2px 8px rgba(0,0,0,.75); }
 .badge { display:inline-block; margin:.9rem .4rem 0 0; padding:.3rem .62rem; border-radius:999px; font-size:.72rem;
  background:#123451; border:1px solid #2b688e; color:#e3f3ff; }
@@ -119,7 +120,7 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
  font:700 .55rem 'IBM Plex Mono',monospace; letter-spacing:.06em; }
 .econ-concepts { position:absolute; left:9%; right:9%; top:65%; color:#8eacc0; font:600 .49rem 'IBM Plex Mono',monospace; letter-spacing:.08em; }
 .econ-flow { position:absolute; left:9%; right:9%; bottom:9%; color:#f0c75b; font:700 .6rem 'IBM Plex Mono',monospace; letter-spacing:.08em; text-align:left; }
-.world-banner { position:relative; margin-top:.3rem; height:60px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
+.world-banner { position:relative; margin-top:-.1rem; height:74px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
  background:linear-gradient(180deg,rgba(101,190,225,.17) 0 33%,rgba(238,248,252,.10) 33% 66%,rgba(101,190,225,.17) 66%);
  box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.14); }
 .world-banner:before,.world-banner:after { content:""; position:absolute; top:0; bottom:0; width:90px; z-index:2; pointer-events:none; }
@@ -187,10 +188,10 @@ def hero(subtitle: str) -> None:
     st.markdown(f"""
     <div class="hero">
       <div class="hero-copy"><div class="eyebrow">Intelligence workspace · Uso educativo</div>
-      <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p>
-      <div class="hero-meta">Corrientes · Argentina · {period_label()}</div></div>
+      <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p></div>
       <div class="brand-lockup"><div class="brand-name">SNOOPY 2.0</div>
-      <div class="brand-author">X: @PamperoSur</div></div>
+      <div class="brand-author">X: @PamperoSur</div>
+      <div class="hero-meta">Corrientes · Argentina · {period_label()}</div></div>
     </div>""", unsafe_allow_html=True)
 
 
