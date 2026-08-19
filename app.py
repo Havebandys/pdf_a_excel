@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 import io
 import ipaddress
 import re
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -135,6 +137,38 @@ hr { border-color:#20425d; }
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
+
+
+def _hero_image_uri() -> str:
+    """Carga el fondo institucional sin exponer una ruta local al navegador."""
+    image_path = Path(__file__).with_name("snoopy_accountant_hero.webp")
+    try:
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        return f"data:image/webp;base64,{encoded}"
+    except OSError:
+        return ""
+
+
+_HERO_IMAGE = _hero_image_uri()
+if _HERO_IMAGE:
+    st.markdown(f"""
+    <style>
+    .hero {{
+      position:relative;
+      isolation:isolate;
+      background:
+        linear-gradient(90deg,rgba(7,27,47,.99) 0%,rgba(7,27,47,.97) 43%,rgba(7,27,47,.55) 68%,rgba(7,27,47,.20) 100%),
+        linear-gradient(180deg,rgba(7,27,47,.12),rgba(7,27,47,.58)),
+        url('{_HERO_IMAGE}') right center/cover no-repeat;
+    }}
+    .hero:after {{
+      content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+      background:radial-gradient(circle at 83% 34%,rgba(38,206,210,.16),transparent 30%);
+    }}
+    .hero > div:first-child {{ position:relative; z-index:2; }}
+    .brand-lockup {{ position:relative; z-index:3; backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); }}
+    </style>
+    """, unsafe_allow_html=True)
 
 
 def now_ar() -> datetime:
