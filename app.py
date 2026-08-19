@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import base64
 import io
 import ipaddress
 import re
 import urllib.request
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -19,6 +17,7 @@ from parsers import parse_pdf
 
 APP_VERSION = "Snoopy 2.0"
 AUTHOR = "@PamperoSur"
+AUTHOR_CREDIT = "X: @PamperoSur · CAF"
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 MONTHS = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -101,10 +100,16 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .side-disclaimer strong { color:#fff; }
 .disclaimer-head { display:flex; align-items:flex-start; justify-content:space-between; gap:.65rem; margin-bottom:.45rem; }
 .disclaimer-author { color:#e9c968; font:600 .62rem 'IBM Plex Mono',monospace; white-space:nowrap; text-align:right; }
-.river-pride { margin-top:.62rem; padding-top:.58rem; border-top:1px solid rgba(222,188,88,.25); text-align:center; }
-.river-pride img { display:block; width:82px; height:82px; object-fit:contain; margin:.05rem auto .25rem; filter:drop-shadow(0 8px 12px rgba(0,0,0,.28)); }
-.river-title { color:#fff; font:800 1.05rem Inter,sans-serif; letter-spacing:.08em; }
-.river-subtitle { margin-top:.08rem; color:#ed1b2f; font:700 .66rem 'IBM Plex Mono',monospace; letter-spacing:.16em; }
+.econ-visual { position:relative; margin-top:.62rem; padding:.7rem .72rem .62rem; border-top:1px solid rgba(222,188,88,.25);
+ border-radius:11px; background:radial-gradient(circle at 86% 20%,rgba(72,215,208,.13),transparent 35%),rgba(5,25,43,.5); overflow:hidden; }
+.econ-title { color:#5ee2da; font:700 .72rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
+.ledger-mini { margin-top:.52rem; border:1px solid rgba(91,190,193,.38); border-radius:8px; overflow:hidden; transform:perspective(600px) rotateX(1deg); }
+.ledger-head,.ledger-row { display:grid; grid-template-columns:.72fr 1.55fr .72fr .72fr; }
+.ledger-head span { padding:.3rem .28rem; background:#0e806f; color:#effffd; font:600 .42rem 'IBM Plex Mono',monospace; }
+.ledger-row span { padding:.28rem; border-top:1px solid rgba(65,111,136,.42); border-right:1px solid rgba(65,111,136,.35); color:#aec6d7; font:500 .42rem 'IBM Plex Mono',monospace; white-space:nowrap; overflow:hidden; }
+.econ-equality { display:flex; justify-content:space-between; align-items:center; margin-top:.46rem; color:#f1cb67; font:700 .55rem 'IBM Plex Mono',monospace; letter-spacing:.06em; }
+.econ-concepts { margin-top:.35rem; color:#9bb4c7; font:600 .47rem 'IBM Plex Mono',monospace; letter-spacing:.08em; }
+.econ-flow { margin-top:.45rem; color:#fff; font:700 .57rem 'IBM Plex Mono',monospace; letter-spacing:.08em; text-align:center; }
 .world-banner { position:relative; margin-top:.5rem; height:66px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
  background:linear-gradient(180deg,rgba(101,190,225,.17) 0 33%,rgba(238,248,252,.10) 33% 66%,rgba(101,190,225,.17) 66%);
  box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.14); }
@@ -143,7 +148,7 @@ def hero(subtitle: str) -> None:
       <div><div class="eyebrow">Intelligence workspace · Uso educativo</div>
       <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p></div>
       <div class="brand-lockup"><div class="brand-name">SNOOPY 2.0</div>
-      <div class="brand-author">X: @PamperoSur · CAF</div>
+      <div class="brand-author">X: @PamperoSur</div>
       <div class="brand-status">{period_label()} · Corrientes</div></div>
     </div>""", unsafe_allow_html=True)
 
@@ -275,6 +280,37 @@ def log_access(username: str, success: bool, event_type: str = "LOGIN") -> None:
         pass
 
 
+def acceptance_required(username: str) -> bool:
+    """Exige aceptación inicial, cada 10 ingresos y después de cambiar la clave."""
+    normalized = username.lower().strip()
+    if not normalized:
+        return True
+    try:
+        rows = (db().table("access_logs")
+                .select("event_type,success,created_at")
+                .eq("username", normalized)
+                .order("created_at", desc=True)
+                .limit(100).execute().data or [])
+        accepted_at = None
+        password_reset_at = None
+        successful_logins = 0
+        for row in rows:
+            event = str(row.get("event_type") or "")
+            created = str(row.get("created_at") or "")
+            if event == "TERMS_ACCEPTED" and accepted_at is None:
+                accepted_at = created
+            elif event == "PASSWORD_RESET" and password_reset_at is None:
+                password_reset_at = created
+            elif event == "LOGIN" and bool(row.get("success")):
+                if accepted_at is None or created > accepted_at:
+                    successful_logins += 1
+        return accepted_at is None or successful_logins >= 9 or (
+            password_reset_at is not None and password_reset_at > accepted_at
+        )
+    except Exception:
+        return True
+
+
 def register_page_open() -> None:
     """Registra una sola apertura por sesión, incluso antes del inicio de sesión."""
     if not st.session_state.get("_page_open_logged"):
@@ -295,16 +331,9 @@ def authenticate(username: str, password: str):
 def academic_notice() -> None:
     st.markdown(f"""
     <div class="legal"><div class="legal-title">Descargo de responsabilidad</div>
-    <span class="author">Autoría: {AUTHOR} · {period_label()}</span><br>
+    <span class="author">Autoría: {AUTHOR_CREDIT} · {period_label()}</span><br>
     <b>Emprendedurismo (IA) - Corrientes · {APP_VERSION} · USO EXCLUSIVAMENTE EDUCATIVO</b><br><br>
     {DISCLAIMER}</div>""", unsafe_allow_html=True)
-
-
-@st.cache_data(show_spinner=False)
-def river_logo_data_url() -> str:
-    logo_path = Path(__file__).with_name("river_logo.png")
-    encoded = base64.b64encode(logo_path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
 
 
 def excel_preview() -> None:
@@ -324,10 +353,17 @@ def excel_preview() -> None:
 def side_disclaimer() -> None:
     st.markdown(f"""
     <div class="side-disclaimer"><div class="disclaimer-head">
-      <div class="legal-title">Descargo de responsabilidad</div><div class="disclaimer-author">AUTORÍA · {AUTHOR}</div></div>
+      <div class="legal-title">Descargo de responsabilidad</div><div class="disclaimer-author">AUTORÍA · {AUTHOR_CREDIT}</div></div>
       <strong>Uso exclusivamente educativo.</strong><br><br>{DISCLAIMER}
-      <div class="river-pride"><img src="{river_logo_data_url()}" alt="Escudo de River Plate">
-      <div class="river-title">EL MÁS GRANDE</div><div class="river-subtitle">ORGULLO MILLONARIO</div></div>
+      <div class="econ-visual"><div class="econ-title">El ADN de las Ciencias Económicas</div>
+        <div class="ledger-mini"><div class="ledger-head"><span>FECHA</span><span>CUENTA</span><span>DEBE</span><span>HABER</span></div>
+        <div class="ledger-row"><span>18/08</span><span>BANCO</span><span>125.000</span><span>—</span></div>
+        <div class="ledger-row"><span>18/08</span><span>TRANSFERENCIAS</span><span>—</span><span>125.000</span></div>
+        <div class="ledger-row"><span>31/08</span><span>IMPUESTOS</span><span>8.750</span><span>—</span></div></div>
+        <div class="econ-equality"><span>DEBE = HABER</span><span>CONCILIADO ✓</span></div>
+        <div class="econ-concepts">CUIT · IVA · IIBB · AUDITORÍA · CONTROL</div>
+        <div class="econ-flow">DATOS → CONTROL → CONOCIMIENTO</div>
+      </div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -360,13 +396,19 @@ def login_screen() -> None:
             st.subheader("Ingreso de usuarios")
             username = st.text_input("Usuario").strip().lower()
             password = st.text_input("Clave", type="password")
-            accepted = st.checkbox(
-                "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso."
-            )
+            must_accept = acceptance_required(username)
+            accepted = True
+            if must_accept:
+                accepted = st.checkbox(
+                    "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso."
+                )
+                st.caption("Esta confirmación se solicita al primer ingreso, cada 10 accesos o después de cambiar la clave.")
             if st.button("Ingresar", type="primary", width="stretch", disabled=not accepted):
                 try:
                     user = authenticate(username, password)
                     if user:
+                        if must_accept:
+                            log_access(username, True, "TERMS_ACCEPTED")
                         st.session_state.user = user
                         st.rerun()
                     else:
@@ -424,7 +466,7 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
     control = pd.DataFrame({"Control": ["Aplicación", "Finalidad", "Autoría", "Entorno", "Emisión",
                                                 "Banco", "Movimientos", "Acreditaciones", "Total acreditado", "Filas a revisar"],
                             "Resultado": [f"Extractor Bancario IA - {APP_VERSION}", "Uso exclusivamente educativo",
-                                          AUTHOR, "Emprendedurismo (IA) - Corrientes", period_label(), bank,
+                                          AUTHOR_CREDIT, "Emprendedurismo (IA) - Corrientes", period_label(), bank,
                                           len(full), len(credits), credits["Crédito"].sum(), len(rejected)]})
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         full.to_excel(writer, sheet_name="Movimientos", index=False)
@@ -558,7 +600,7 @@ def extractor_page() -> None:
         if "downloads" in st.session_state:
             book, csv = st.session_state.downloads
             d1, d2 = st.columns(2)
-            d1.download_button("Descargar Excel fiscalizador", book, f"{bank.lower()}_fiscalizacion.xlsx",
+            d1.download_button("Descargar Excel normalizado", book, f"{bank.lower()}_normalizado.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
             d2.download_button("Descargar créditos CSV", csv, f"{bank.lower()}_creditos.csv", "text/csv", width="stretch")
     academic_notice()
@@ -604,12 +646,74 @@ def admin_users_page() -> None:
             db().table("app_users").update({"role": new_role}).eq("username", target).execute(); st.rerun()
         new_password = c2.text_input("Nueva clave", type="password")
         if c2.button("Restablecer clave", width="stretch", disabled=not new_password):
-            db().rpc("reset_app_password", {"p_username": target, "p_new_password": new_password}).execute(); st.success("Clave actualizada.")
+            db().rpc("reset_app_password", {"p_username": target, "p_new_password": new_password}).execute()
+            log_access(target, True, "PASSWORD_RESET")
+            st.success("Clave actualizada. El usuario deberá aceptar nuevamente el descargo.")
         selected = next(u for u in users if u["username"] == target)
         if c3.button("Desactivar" if selected["active"] else "Activar", width="stretch"):
             db().table("app_users").update({"active": not selected["active"]}).eq("username", target).execute(); st.rerun()
         if c3.button("Eliminar usuario", width="stretch"):
             db().table("app_users").delete().eq("username", target).execute(); st.rerun()
+
+
+def all_event_rows(event_type: str, batch_size: int = 1000) -> list[dict]:
+    """Lee todos los eventos por páginas para no truncar los totales de gestión."""
+    rows: list[dict] = []
+    start = 0
+    while True:
+        batch = (db().table("access_logs").select("username,event_type")
+                 .eq("event_type", event_type)
+                 .range(start, start + batch_size - 1).execute().data or [])
+        rows.extend(batch)
+        if len(batch) < batch_size:
+            break
+        start += batch_size
+    return rows
+
+
+def management_page() -> None:
+    st.title("Datos de gestión")
+    st.caption("Indicadores acumulados por usuario. Panel exclusivo del administrador.")
+    users = db().table("app_users").select(
+        "username,full_name,role,active,access_count,last_login"
+    ).order("username").execute().data or []
+    pdf_rows = all_event_rows("PDF_PROCESSED")
+    pdf_counts = pd.Series([str(row.get("username") or "").lower() for row in pdf_rows]).value_counts()
+    total_pdfs = int(len(pdf_rows))
+    records = []
+    for item in users:
+        username = str(item.get("username") or "").lower()
+        accesses = int(item.get("access_count") or 0)
+        pdfs = int(pdf_counts.get(username, 0))
+        records.append({
+            "Usuario": username.upper(),
+            "Nombre": item.get("full_name") or "",
+            "Rol": item.get("role") or "",
+            "Activo": bool(item.get("active")),
+            "Ingresos totales": accesses,
+            "PDF procesados": pdfs,
+            "PDF por ingreso": round(pdfs / accesses, 2) if accesses else 0.0,
+            "% de PDF totales": round((pdfs / total_pdfs) * 100, 1) if total_pdfs else 0.0,
+            "Último ingreso": datetime_ar(item.get("last_login")),
+        })
+    frame = pd.DataFrame(records)
+    active_users = int(frame["Activo"].sum()) if not frame.empty else 0
+    total_accesses = int(frame["Ingresos totales"].sum()) if not frame.empty else 0
+    ratio = total_pdfs / total_accesses if total_accesses else 0
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Usuarios activos", active_users)
+    k2.metric("Ingresos acumulados", total_accesses)
+    k3.metric("PDF procesados", total_pdfs)
+    k4.metric("PDF por ingreso", f"{ratio:.2f}")
+    if frame.empty:
+        st.info("Todavía no hay usuarios para mostrar.")
+        return
+    st.dataframe(frame, hide_index=True, width="stretch", column_config={
+        "% de PDF totales": st.column_config.ProgressColumn(
+            "% de PDF totales", min_value=0.0, max_value=100.0, format="%.1f%%"
+        )
+    })
+    st.caption("PDF por ingreso = PDF procesados / ingresos totales. El porcentaje representa la participación de cada usuario sobre todos los PDF registrados.")
 
 
 def audit_page() -> None:
@@ -676,7 +780,7 @@ with st.sidebar:
     st.caption(f"{user['full_name']} · {user['role']}")
     pages = ["Extractor"]
     if user["role"] == "Administrador":
-        pages += ["Usuarios", "Auditoría"]
+        pages += ["Gestión", "Usuarios", "Auditoría"]
     page = st.radio("Navegación", pages)
     st.divider()
     st.caption(f"Último acceso: {datetime_ar(user.get('last_login'))} · Argentina")
@@ -687,6 +791,8 @@ with st.sidebar:
 
 if page == "Extractor":
     extractor_page()
+elif page == "Gestión":
+    management_page()
 elif page == "Usuarios":
     admin_users_page()
 else:
