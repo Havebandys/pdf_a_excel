@@ -184,8 +184,25 @@ def headers() -> dict[str, str]:
 
 def client_info() -> dict[str, str]:
     h = headers()
-    forwarded = h.get("x-forwarded-for", "")
-    ip = forwarded.split(",")[0].strip() or h.get("x-real-ip", "N/D")
+    candidates = []
+    for key in ("cf-connecting-ip", "true-client-ip", "x-real-ip", "x-forwarded-for"):
+        candidates.extend(part.strip() for part in h.get(key, "").split(",") if part.strip())
+    try:
+        context_ip = str(st.context.ip_address or "").strip()
+        if context_ip:
+            candidates.append(context_ip)
+    except Exception:
+        pass
+    ip = "N/D"
+    for candidate in candidates:
+        try:
+            if ipaddress.ip_address(candidate).is_global:
+                ip = candidate
+                break
+        except ValueError:
+            continue
+    if ip == "N/D" and candidates:
+        ip = candidates[0]
     ua = h.get("user-agent", "N/D")
     info = {"ip_address": ip, "city": h.get("x-vercel-ip-city", "N/D"),
             "region": h.get("x-vercel-ip-country-region", "N/D"),
@@ -195,6 +212,40 @@ def client_info() -> dict[str, str]:
         geo = geolocate(ip)
         info.update({k: geo.get(k, info[k]) for k in ("city", "region", "country")})
     return info
+
+
+def simple_device(user_agent: str) -> str:
+    """Convierte el user-agent técnico en una descripción breve y útil."""
+    ua = str(user_agent or "")
+    if not ua or ua == "N/D":
+        return "N/D"
+    if "HeadlessChrome" in ua:
+        match = re.search(r"HeadlessChrome/(\d+)", ua)
+        return f"Control automático · Chrome {match.group(1) if match else ''}".strip()
+    browser = "Navegador"
+    version = ""
+    patterns = (("Edg/", "Edge"), ("OPR/", "Opera"), ("Chrome/", "Chrome"),
+                ("Firefox/", "Firefox"), ("Version/", "Safari"))
+    for token, name in patterns:
+        match = re.search(re.escape(token) + r"(\d+)", ua)
+        if match:
+            browser, version = name, match.group(1)
+            break
+    if "iPhone" in ua:
+        system = "iPhone"
+    elif "iPad" in ua:
+        system = "iPad"
+    elif "Android" in ua:
+        system = "Android"
+    elif "Macintosh" in ua or "Mac OS X" in ua:
+        system = "macOS"
+    elif "Windows" in ua:
+        system = "Windows"
+    elif "Linux" in ua:
+        system = "Linux"
+    else:
+        system = "Dispositivo desconocido"
+    return f"{browser}{' ' + version if version else ''} · {system}"
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -598,11 +649,15 @@ def audit_page() -> None:
         filtered = filtered[filtered["success"].fillna(False).astype(bool) == wanted]
 
     view = filtered.rename(columns={"username": "Usuario", "event_type": "Evento", "success": "Correcto",
-                                    "ip_address": "IP", "city": "Ciudad", "region": "Región",
-                                    "country": "País", "user_agent": "Navegador/dispositivo",
+                                    "ip_address": "IP", "user_agent": "Dispositivo",
                                     "created_at": "Fecha y hora"})
     view["Usuario"] = view["Usuario"].astype(str).str.upper()
     view["Fecha y hora"] = view["Fecha y hora"].map(datetime_ar)
+    location_parts = filtered[["city", "region", "country"]].fillna("N/D").astype(str)
+    view["Ubicación"] = location_parts.apply(
+        lambda row: " · ".join(dict.fromkeys(x for x in row if x not in {"", "N/D", "None"})) or "N/D", axis=1)
+    view["Dispositivo"] = view["Dispositivo"].map(simple_device)
+    view = view[["Usuario", "Evento", "Correcto", "Fecha y hora", "Ubicación", "IP", "Dispositivo"]]
     st.dataframe(view, hide_index=True, width="stretch")
     st.download_button("Descargar auditoría CSV", view.to_csv(index=False).encode("utf-8-sig"),
                        "auditoria_snoopy.csv", "text/csv")
