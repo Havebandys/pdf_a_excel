@@ -102,14 +102,14 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .disclaimer-author { color:#e9c968; font:600 .62rem 'IBM Plex Mono',monospace; white-space:nowrap; text-align:right; }
 .econ-visual { position:relative; margin-top:.62rem; padding:.7rem .72rem .62rem; border-top:1px solid rgba(222,188,88,.25);
  border-radius:11px; background:radial-gradient(circle at 86% 20%,rgba(72,215,208,.13),transparent 35%),rgba(5,25,43,.5); overflow:hidden; }
-.econ-title { color:#5ee2da; font:700 .72rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
+.econ-title { color:#f2c65c; font:700 .72rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
 .ledger-mini { margin-top:.52rem; border:1px solid rgba(91,190,193,.38); border-radius:8px; overflow:hidden; transform:perspective(600px) rotateX(1deg); }
 .ledger-head,.ledger-row { display:grid; grid-template-columns:.72fr 1.55fr .72fr .72fr; }
 .ledger-head span { padding:.3rem .28rem; background:#0e806f; color:#effffd; font:600 .42rem 'IBM Plex Mono',monospace; }
 .ledger-row span { padding:.28rem; border-top:1px solid rgba(65,111,136,.42); border-right:1px solid rgba(65,111,136,.35); color:#aec6d7; font:500 .42rem 'IBM Plex Mono',monospace; white-space:nowrap; overflow:hidden; }
 .econ-equality { display:flex; justify-content:space-between; align-items:center; margin-top:.46rem; color:#f1cb67; font:700 .55rem 'IBM Plex Mono',monospace; letter-spacing:.06em; }
-.econ-concepts { margin-top:.35rem; color:#9bb4c7; font:600 .47rem 'IBM Plex Mono',monospace; letter-spacing:.08em; }
-.econ-flow { margin-top:.45rem; color:#fff; font:700 .57rem 'IBM Plex Mono',monospace; letter-spacing:.08em; text-align:center; }
+.econ-concepts { margin-top:.35rem; color:#e7c567; font:600 .47rem 'IBM Plex Mono',monospace; letter-spacing:.08em; }
+.econ-flow { margin-top:.45rem; color:#f3d77f; font:700 .57rem 'IBM Plex Mono',monospace; letter-spacing:.08em; text-align:center; }
 .world-banner { position:relative; margin-top:.5rem; height:66px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
  background:linear-gradient(180deg,rgba(101,190,225,.17) 0 33%,rgba(238,248,252,.10) 33% 66%,rgba(101,190,225,.17) 66%);
  box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.14); }
@@ -166,6 +166,16 @@ def datetime_ar(value) -> str:
         return parsed.strftime("%d/%m/%Y %H:%M")
     except Exception:
         return str(value)
+
+
+def password_age_days(value) -> int | None:
+    if not value or pd.isna(value):
+        return None
+    try:
+        changed = pd.to_datetime(value, utc=True).tz_convert(TZ_AR)
+        return max(0, (now_ar().date() - changed.date()).days)
+    except Exception:
+        return None
 
 
 def clean_view(frame: pd.DataFrame) -> pd.DataFrame:
@@ -323,7 +333,18 @@ def authenticate(username: str, password: str):
     rows = result.data or []
     if rows:
         log_access(username, True)
-        return rows[0]
+        user = rows[0]
+        try:
+            metadata = (db().table("app_users").select(
+                "username,full_name,role,active,status,archived,password_changed_at,must_change_password"
+            ).eq("username", username.lower().strip()).single().execute().data or {})
+            user.update(metadata)
+        except Exception:
+            user.setdefault("status", "active")
+            user.setdefault("archived", False)
+            user.setdefault("must_change_password", False)
+            user.setdefault("password_changed_at", None)
+        return user
     log_access(username, False)
     return None
 
@@ -351,10 +372,8 @@ def excel_preview() -> None:
 
 
 def side_disclaimer() -> None:
-    st.markdown(f"""
-    <div class="side-disclaimer"><div class="disclaimer-head">
-      <div class="legal-title">Descargo de responsabilidad</div><div class="disclaimer-author">AUTORÍA · {AUTHOR_CREDIT}</div></div>
-      <strong>Uso exclusivamente educativo.</strong><br><br>{DISCLAIMER}
+    st.markdown("""
+    <div class="side-disclaimer">
       <div class="econ-visual"><div class="econ-title">El ADN de las Ciencias Económicas</div>
         <div class="ledger-mini"><div class="ledger-head"><span>FECHA</span><span>CUENTA</span><span>DEBE</span><span>HABER</span></div>
         <div class="ledger-row"><span>18/08</span><span>BANCO</span><span>125.000</span><span>—</span></div>
@@ -626,17 +645,22 @@ def admin_users_page() -> None:
                 except Exception as exc:
                     st.error(f"No se pudo crear: {exc}")
     users = db().table("app_users").select(
-        "username,full_name,role,active,created_at,created_by,last_login,access_count"
+        "username,full_name,role,active,status,archived,created_at,created_by,last_login,access_count,password_changed_at,must_change_password"
     ).order("username").execute().data or []
     user_df = pd.DataFrame(users).rename(columns={
         "username": "Usuario", "full_name": "Nombre completo", "role": "Rol", "active": "Activo",
         "created_at": "Creado", "created_by": "Creado por", "last_login": "Último ingreso",
-        "access_count": "Cantidad de accesos"})
+        "access_count": "Cantidad de accesos", "status": "Estado", "archived": "Archivado",
+        "password_changed_at": "Último cambio de clave", "must_change_password": "Cambio obligatorio"})
     if not user_df.empty:
         user_df["Creado"] = user_df["Creado"].map(datetime_ar)
         user_df["Último ingreso"] = user_df["Último ingreso"].map(datetime_ar)
+        user_df["Antigüedad clave"] = user_df["Último cambio de clave"].map(
+            lambda value: f"{password_age_days(value)} días" if password_age_days(value) is not None else "N/D"
+        )
+        user_df["Último cambio de clave"] = user_df["Último cambio de clave"].map(datetime_ar)
     st.dataframe(user_df, hide_index=True, width="stretch")
-    editable = [u["username"] for u in users if u["username"] != "adm"]
+    editable = [u["username"] for u in users if u["username"] != "adm" and not u.get("archived", False)]
     if editable:
         st.markdown("#### Modificar usuario")
         target = st.selectbox("Usuario", editable)
@@ -647,13 +671,57 @@ def admin_users_page() -> None:
         new_password = c2.text_input("Nueva clave", type="password")
         if c2.button("Restablecer clave", width="stretch", disabled=not new_password):
             db().rpc("reset_app_password", {"p_username": target, "p_new_password": new_password}).execute()
+            db().table("app_users").update({
+                "password_changed_at": now_ar().isoformat(), "must_change_password": True
+            }).eq("username", target).execute()
             log_access(target, True, "PASSWORD_RESET")
-            st.success("Clave actualizada. El usuario deberá aceptar nuevamente el descargo.")
+            st.success("Clave temporal asignada. En el próximo ingreso deberá aceptar el descargo y crear una clave personal.")
         selected = next(u for u in users if u["username"] == target)
-        if c3.button("Desactivar" if selected["active"] else "Activar", width="stretch"):
-            db().table("app_users").update({"active": not selected["active"]}).eq("username", target).execute(); st.rerun()
-        if c3.button("Eliminar usuario", width="stretch"):
-            db().table("app_users").delete().eq("username", target).execute(); st.rerun()
+        if c3.button("Pausar" if selected["active"] else "Reactivar", width="stretch"):
+            new_active = not selected["active"]
+            db().table("app_users").update({
+                "active": new_active, "status": "active" if new_active else "paused"
+            }).eq("username", target).execute(); st.rerun()
+        if c3.button("Archivar usuario", width="stretch"):
+            db().table("app_users").update({
+                "active": False, "status": "archived", "archived": True,
+                "archived_at": now_ar().isoformat()
+            }).eq("username", target).execute()
+            log_access(target, True, "USER_ARCHIVED")
+            st.rerun()
+
+
+def password_page(forced: bool = False) -> None:
+    st.title("Crear nueva clave" if forced else "Cambiar mi clave")
+    if forced:
+        st.warning("La clave utilizada es temporal. Para continuar debés crear una clave personal.")
+    else:
+        st.caption("La nueva clave reemplazará inmediatamente la clave actual.")
+    with st.form("change_own_password", clear_on_submit=True):
+        new_password = st.text_input("Nueva clave", type="password")
+        confirmation = st.text_input("Repetir nueva clave", type="password")
+        submitted = st.form_submit_button("Guardar nueva clave", type="primary", width="stretch")
+        if submitted:
+            if len(new_password) < 8:
+                st.error("La nueva clave debe tener al menos 8 caracteres.")
+            elif new_password != confirmation:
+                st.error("Las claves ingresadas no coinciden.")
+            else:
+                username = st.session_state.user["username"]
+                try:
+                    db().rpc("reset_app_password", {
+                        "p_username": username, "p_new_password": new_password
+                    }).execute()
+                    db().table("app_users").update({
+                        "password_changed_at": now_ar().isoformat(), "must_change_password": False
+                    }).eq("username", username).execute()
+                    log_access(username, True, "PASSWORD_CHANGED")
+                    st.session_state.user["must_change_password"] = False
+                    st.session_state.user["password_changed_at"] = now_ar().isoformat()
+                    st.success("Clave personal guardada correctamente.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo actualizar la clave: {exc}")
 
 
 def all_event_rows(event_type: str, batch_size: int = 1000) -> list[dict]:
@@ -675,7 +743,7 @@ def management_page() -> None:
     st.title("Datos de gestión")
     st.caption("Indicadores acumulados por usuario. Panel exclusivo del administrador.")
     users = db().table("app_users").select(
-        "username,full_name,role,active,access_count,last_login"
+        "username,full_name,role,active,status,archived,access_count,last_login,password_changed_at"
     ).order("username").execute().data or []
     pdf_rows = all_event_rows("PDF_PROCESSED")
     pdf_counts = pd.Series([str(row.get("username") or "").lower() for row in pdf_rows]).value_counts()
@@ -689,15 +757,16 @@ def management_page() -> None:
             "Usuario": username.upper(),
             "Nombre": item.get("full_name") or "",
             "Rol": item.get("role") or "",
-            "Activo": bool(item.get("active")),
+            "Estado": "Archivado" if item.get("archived") else ("Activo" if item.get("active") else "Pausado"),
             "Ingresos totales": accesses,
             "PDF procesados": pdfs,
             "PDF por ingreso": round(pdfs / accesses, 2) if accesses else 0.0,
             "% de PDF totales": round((pdfs / total_pdfs) * 100, 1) if total_pdfs else 0.0,
             "Último ingreso": datetime_ar(item.get("last_login")),
+            "Antigüedad clave": password_age_days(item.get("password_changed_at")),
         })
     frame = pd.DataFrame(records)
-    active_users = int(frame["Activo"].sum()) if not frame.empty else 0
+    active_users = int((frame["Estado"] == "Activo").sum()) if not frame.empty else 0
     total_accesses = int(frame["Ingresos totales"].sum()) if not frame.empty else 0
     ratio = total_pdfs / total_accesses if total_accesses else 0
     k1, k2, k3, k4 = st.columns(4)
@@ -711,7 +780,8 @@ def management_page() -> None:
     st.dataframe(frame, hide_index=True, width="stretch", column_config={
         "% de PDF totales": st.column_config.ProgressColumn(
             "% de PDF totales", min_value=0.0, max_value=100.0, format="%.1f%%"
-        )
+        ),
+        "Antigüedad clave": st.column_config.NumberColumn("Días desde cambio", format="%d días")
     })
     st.caption("PDF por ingreso = PDF procesados / ingresos totales. El porcentaje representa la participación de cada usuario sobre todos los PDF registrados.")
 
@@ -774,13 +844,21 @@ if "user" not in st.session_state:
     st.stop()
 
 user = st.session_state.user
+if user.get("must_change_password"):
+    password_page(forced=True)
+    st.stop()
+
 with st.sidebar:
     st.markdown("### Snoopy 2.0")
     st.caption(f"Extractor Bancario IA · {AUTHOR}")
     st.caption(f"{user['full_name']} · {user['role']}")
+    age_days = password_age_days(user.get("password_changed_at"))
+    if age_days is not None and age_days >= 90:
+        st.warning(f"Tu clave tiene {age_days} días. Se recomienda actualizarla.")
     pages = ["Extractor"]
     if user["role"] == "Administrador":
         pages += ["Gestión", "Usuarios", "Auditoría"]
+    pages += ["Mi clave"]
     page = st.radio("Navegación", pages)
     st.divider()
     st.caption(f"Último acceso: {datetime_ar(user.get('last_login'))} · Argentina")
@@ -791,6 +869,8 @@ with st.sidebar:
 
 if page == "Extractor":
     extractor_page()
+elif page == "Mi clave":
+    password_page()
 elif page == "Gestión":
     management_page()
 elif page == "Usuarios":
