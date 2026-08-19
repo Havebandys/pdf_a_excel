@@ -54,12 +54,15 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .hero h1 { margin:.28rem 0 .5rem; color:#fff; font-size:clamp(1.75rem,3vw,2.45rem); letter-spacing:-.035em; }
 .hero p { margin:0; color:#b7cadb; max-width:900px; }
 .eyebrow { color:#50d3c8; font-size:.76rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
-.brand-lockup { min-width:225px; padding:.9rem 1.05rem; border:1px solid rgba(91,218,215,.35); border-radius:16px;
- background:rgba(4,20,35,.52); text-align:right; box-shadow:inset 0 0 28px rgba(31,181,188,.07); }
-.brand-name { font:800 1.85rem 'IBM Plex Mono',monospace; letter-spacing:.055em;
- background:linear-gradient(90deg,#56e4d9,#56b9ff); -webkit-background-clip:text; background-clip:text; color:transparent; }
-.brand-author { margin-top:.32rem; color:#fff; font:600 .76rem 'IBM Plex Mono',monospace; }
-.brand-status { margin-top:.65rem; color:#72ddd6; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
+.brand-lockup { min-width:285px; align-self:end; padding:0 .15rem .1rem 0; text-align:right; background:transparent; border:0; }
+.brand-name { font:800 clamp(1.85rem,2.55vw,2.55rem) 'IBM Plex Mono',monospace; letter-spacing:.075em; line-height:1;
+ background:linear-gradient(105deg,#8ff8ef 0%,#48d7d0 38%,#55bfff 82%); -webkit-background-clip:text; background-clip:text; color:transparent;
+ filter:drop-shadow(0 3px 10px rgba(0,0,0,.78)) drop-shadow(0 0 16px rgba(50,210,216,.18)); }
+.brand-author { margin-top:.48rem; color:#eaf8ff; font:600 .74rem 'IBM Plex Mono',monospace; letter-spacing:.045em;
+ text-shadow:0 2px 8px rgba(0,0,0,.9); }
+.hero-copy { min-width:0; }
+.hero-meta { margin-top:.72rem; max-width:900px; color:#78ddd7; text-align:right;
+ font:600 .64rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; text-shadow:0 2px 8px rgba(0,0,0,.75); }
 .badge { display:inline-block; margin:.9rem .4rem 0 0; padding:.3rem .62rem; border-radius:999px; font-size:.72rem;
  background:#123451; border:1px solid #2b688e; color:#e3f3ff; }
 .legal-title { color:#f2c65c; font:600 .72rem 'IBM Plex Mono',monospace; letter-spacing:.12em; text-transform:uppercase; margin-bottom:.45rem; }
@@ -133,7 +136,7 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {
  background:linear-gradient(90deg,#087ebc,#0da69c); color:#fff; border:0; }
 hr { border-color:#20425d; }
-@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}}
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0;align-self:auto}.hero-meta{text-align:left}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}}
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
@@ -166,7 +169,7 @@ if _HERO_IMAGE:
       background:radial-gradient(circle at 83% 34%,rgba(38,206,210,.16),transparent 30%);
     }}
     .hero > div:first-child {{ position:relative; z-index:2; }}
-    .brand-lockup {{ position:relative; z-index:3; backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); }}
+    .brand-lockup {{ position:relative; z-index:3; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -183,11 +186,11 @@ def period_label() -> str:
 def hero(subtitle: str) -> None:
     st.markdown(f"""
     <div class="hero">
-      <div><div class="eyebrow">Intelligence workspace · Uso educativo</div>
-      <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p></div>
+      <div class="hero-copy"><div class="eyebrow">Intelligence workspace · Uso educativo</div>
+      <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p>
+      <div class="hero-meta">Corrientes · Argentina · {period_label()}</div></div>
       <div class="brand-lockup"><div class="brand-name">SNOOPY 2.0</div>
-      <div class="brand-author">X: @PamperoSur</div>
-      <div class="brand-status">{period_label()} · Corrientes</div></div>
+      <div class="brand-author">X: @PamperoSur</div></div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -436,7 +439,7 @@ def champions_banner() -> None:
 
 
 def login_screen() -> None:
-    hero("Extractor y herramienta de uso contable académico. Emprendedurismo (IA) · Corrientes.")
+    hero("Extractor y herramienta de uso contable académico. Emprendedurismo (IA).")
     st.markdown(f"""<div class="status-grid">
       <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">7 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
       <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
