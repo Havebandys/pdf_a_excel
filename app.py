@@ -43,8 +43,10 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
  radial-gradient(circle at 88% 3%,rgba(12,152,178,.18),transparent 25%),linear-gradient(145deg,#051321,#09213a 58%,#061725);
  background-size:38px 38px,38px 38px,auto,auto; color:#eef6ff; }
 [data-testid="stSidebar"] { background:#061321; border-right:1px solid #1d4463; }
-[data-testid="stHeader"] { background:transparent; }
-.block-container { max-width:1500px; padding-top:1rem; }
+[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stAppToolbar"],
+[data-testid="stDecoration"], [data-testid="stStatusWidget"], #MainMenu, footer {
+ display:none !important; visibility:hidden !important; height:0 !important; }
+.block-container { max-width:1500px; padding-top:.65rem; }
 .hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2rem; align-items:center; padding:1.6rem 1.75rem;
  border-radius:20px; border:1px solid #28617f; background:radial-gradient(circle at 83% 18%,rgba(24,184,190,.26),transparent 34%),linear-gradient(135deg,rgba(12,44,72,.98),rgba(7,27,47,.98));
  box-shadow:0 22px 60px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05); margin-bottom:1rem; overflow:hidden; }
@@ -220,6 +222,13 @@ def log_access(username: str, success: bool, event_type: str = "LOGIN") -> None:
         db().table("access_logs").insert(payload).execute()
     except Exception:
         pass
+
+
+def register_page_open() -> None:
+    """Registra una sola apertura por sesión, incluso antes del inicio de sesión."""
+    if not st.session_state.get("_page_open_logged"):
+        log_access("(visitante)", True, "PAGE_OPEN")
+        st.session_state._page_open_logged = True
 
 
 def authenticate(username: str, password: str):
@@ -552,23 +561,54 @@ def admin_users_page() -> None:
             db().table("app_users").delete().eq("username", target).execute(); st.rerun()
 
 
-def access_page() -> None:
-    st.title("Registro de accesos")
+def audit_page() -> None:
+    st.title("Auditoría de actividad")
+    st.caption("Panel exclusivo del administrador. Los PDF y sus movimientos no se almacenan.")
     logs = db().table("access_logs").select(
         "username,event_type,success,ip_address,city,region,country,user_agent,created_at"
     ).order("created_at", desc=True).limit(1000).execute().data or []
     frame = pd.DataFrame(logs)
-    if not frame.empty:
-        frame = frame.rename(columns={"username": "Usuario", "event_type": "Evento", "success": "Correcto",
-                                             "ip_address": "IP", "city": "Ciudad", "region": "Región",
-                                             "country": "País", "user_agent": "Navegador/dispositivo",
-                                             "created_at": "Fecha y hora"})
-        frame["Fecha y hora"] = frame["Fecha y hora"].map(datetime_ar)
-    st.dataframe(frame, hide_index=True, width="stretch")
-    if not frame.empty:
-        st.download_button("Descargar registro CSV", frame.to_csv(index=False).encode("utf-8-sig"),
-                           "registro_accesos.csv", "text/csv")
+    if frame.empty:
+        st.info("Todavía no hay actividad registrada.")
+        return
 
+    events = frame["event_type"].fillna("N/D").astype(str)
+    successes = frame["success"].fillna(False).astype(bool)
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Eventos", f"{len(frame):,}".replace(",", "."))
+    k2.metric("Ingresos correctos", int(((events == "LOGIN") & successes).sum()))
+    k3.metric("Intentos fallidos", int(((events == "LOGIN") & ~successes).sum()))
+    k4.metric("PDF procesados", int((events == "PDF_PROCESSED").sum()))
+    valid_ips = frame["ip_address"].replace(["", "N/D", None], pd.NA).dropna()
+    k5.metric("IP diferentes", valid_ips.nunique())
+
+    users = sorted(frame["username"].dropna().astype(str).unique().tolist())
+    event_options = sorted(events.unique().tolist())
+    f1, f2, f3 = st.columns([1, 1.4, 1])
+    selected_user = f1.selectbox("Usuario", ["Todos"] + users, key="audit_user")
+    selected_events = f2.multiselect("Eventos", event_options, default=event_options, key="audit_events")
+    selected_result = f3.selectbox("Resultado", ["Todos", "Correctos", "Fallidos"], key="audit_result")
+
+    filtered = frame.copy()
+    if selected_user != "Todos":
+        filtered = filtered[filtered["username"].astype(str) == selected_user]
+    filtered = filtered[filtered["event_type"].fillna("N/D").astype(str).isin(selected_events)]
+    if selected_result != "Todos":
+        wanted = selected_result == "Correctos"
+        filtered = filtered[filtered["success"].fillna(False).astype(bool) == wanted]
+
+    view = filtered.rename(columns={"username": "Usuario", "event_type": "Evento", "success": "Correcto",
+                                    "ip_address": "IP", "city": "Ciudad", "region": "Región",
+                                    "country": "País", "user_agent": "Navegador/dispositivo",
+                                    "created_at": "Fecha y hora"})
+    view["Usuario"] = view["Usuario"].astype(str).str.upper()
+    view["Fecha y hora"] = view["Fecha y hora"].map(datetime_ar)
+    st.dataframe(view, hide_index=True, width="stretch")
+    st.download_button("Descargar auditoría CSV", view.to_csv(index=False).encode("utf-8-sig"),
+                       "auditoria_snoopy.csv", "text/csv")
+
+
+register_page_open()
 
 if "user" not in st.session_state:
     login_screen()
@@ -581,7 +621,7 @@ with st.sidebar:
     st.caption(f"{user['full_name']} · {user['role']}")
     pages = ["Extractor"]
     if user["role"] == "Administrador":
-        pages += ["Usuarios", "Accesos"]
+        pages += ["Usuarios", "Auditoría"]
     page = st.radio("Navegación", pages)
     st.divider()
     st.caption(f"Último acceso: {datetime_ar(user.get('last_login'))} · Argentina")
@@ -595,4 +635,4 @@ if page == "Extractor":
 elif page == "Usuarios":
     admin_users_page()
 else:
-    access_page()
+    audit_page()
