@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 import io
 import ipaddress
 import re
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -76,9 +78,10 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .kpi-accent { height:2px; width:34px; margin-top:.65rem; background:linear-gradient(90deg,#4bdbd2,#168ec8); border-radius:3px; }
 [data-testid="stFileUploader"] { background:#0b233a; border:1px dashed #37779d; border-radius:14px; padding:.5rem; }
 .stTextInput input, [data-baseweb="select"] > div { border-radius:10px !important; }
+.stTextInput input[aria-label="Usuario"] { text-transform:uppercase; letter-spacing:.045em; }
 .login-shell { padding:.2rem .25rem .8rem; }
 .login-kicker { color:#52d8cf; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; }
-.login-note { color:#849db1; font-size:.68rem; line-height:1.35; margin:.05rem 0 .15rem; }
+.stColumn:has(.login-marker) [data-testid="stVerticalBlockBorderWrapper"] { min-height:430px; }
 .excel-visual { position:relative; min-height:430px; height:100%; border-radius:18px; border:1px solid #285b79; overflow:hidden;
  background:radial-gradient(circle at 50% 38%,rgba(31,190,185,.17),transparent 48%),linear-gradient(145deg,#0c2943,#071c30); padding:1rem; }
 .excel-visual:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent 52%,rgba(7,28,48,.95) 96%); pointer-events:none; }
@@ -94,7 +97,12 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
  background:linear-gradient(165deg,rgba(40,47,54,.94),rgba(18,35,51,.96)); color:#afc0cf; font-size:.72rem; line-height:1.52; }
 .side-disclaimer .legal-title { margin-bottom:.48rem; }
 .side-disclaimer strong { color:#fff; }
-.side-disclaimer .legal-meta { margin-top:.55rem; padding-top:.5rem; border-top:1px solid rgba(222,188,88,.25); color:#e9c968; font-size:.64rem; }
+.disclaimer-head { display:flex; align-items:flex-start; justify-content:space-between; gap:.65rem; margin-bottom:.45rem; }
+.disclaimer-author { color:#e9c968; font:600 .62rem 'IBM Plex Mono',monospace; white-space:nowrap; text-align:right; }
+.river-pride { margin-top:.62rem; padding-top:.58rem; border-top:1px solid rgba(222,188,88,.25); text-align:center; }
+.river-pride img { display:block; width:82px; height:82px; object-fit:contain; margin:.05rem auto .25rem; filter:drop-shadow(0 8px 12px rgba(0,0,0,.28)); }
+.river-title { color:#fff; font:800 1.05rem Inter,sans-serif; letter-spacing:.08em; }
+.river-subtitle { margin-top:.08rem; color:#ed1b2f; font:700 .66rem 'IBM Plex Mono',monospace; letter-spacing:.16em; }
 .world-banner { position:relative; margin-top:.5rem; height:66px; border-radius:16px; overflow:hidden; border:1px solid #2b6380;
  background:linear-gradient(180deg,rgba(101,190,225,.17) 0 33%,rgba(238,248,252,.10) 33% 66%,rgba(101,190,225,.17) 66%);
  box-shadow:inset 0 1px rgba(255,255,255,.05),0 12px 30px rgba(0,0,0,.14); }
@@ -232,6 +240,13 @@ def academic_notice() -> None:
     {DISCLAIMER}</div>""", unsafe_allow_html=True)
 
 
+@st.cache_data(show_spinner=False)
+def river_logo_data_url() -> str:
+    logo_path = Path(__file__).with_name("river_logo.png")
+    encoded = base64.b64encode(logo_path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def excel_preview() -> None:
     st.markdown("""
     <div class="excel-visual"><div class="doc-tag">PDF RAW DATA → EXCEL</div>
@@ -248,9 +263,11 @@ def excel_preview() -> None:
 
 def side_disclaimer() -> None:
     st.markdown(f"""
-    <div class="side-disclaimer"><div class="legal-title">Descargo de responsabilidad</div>
+    <div class="side-disclaimer"><div class="disclaimer-head">
+      <div class="legal-title">Descargo de responsabilidad</div><div class="disclaimer-author">AUTORÍA · {AUTHOR}</div></div>
       <strong>Uso exclusivamente educativo.</strong><br><br>{DISCLAIMER}
-      <div class="legal-meta">AUTORÍA · {AUTHOR}<br>{period_label()} · CORRIENTES<br>{APP_VERSION}</div>
+      <div class="river-pride"><img src="{river_logo_data_url()}" alt="Escudo de River Plate">
+      <div class="river-title">EL MÁS GRANDE</div><div class="river-subtitle">ORGULLO MILLONARIO</div></div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -278,6 +295,7 @@ def login_screen() -> None:
         excel_preview()
     with center:
         with st.container(border=True):
+            st.markdown('<span class="login-marker"></span>', unsafe_allow_html=True)
             st.markdown('<div class="login-kicker">Acceso seguro · Control de usuarios</div>', unsafe_allow_html=True)
             st.subheader("Ingreso de usuarios")
             username = st.text_input("Usuario").strip().lower()
@@ -285,7 +303,6 @@ def login_screen() -> None:
             accepted = st.checkbox(
                 "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso."
             )
-            st.markdown('<div class="login-note">Registro de acceso: usuario, fecha, hora, IP y ubicación aproximada.</div>', unsafe_allow_html=True)
             if st.button("Ingresar", type="primary", width="stretch", disabled=not accepted):
                 try:
                     user = authenticate(username, password)
