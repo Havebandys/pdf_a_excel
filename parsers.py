@@ -11,6 +11,7 @@ import pdfplumber
 
 AR_MONEY = r"-?\d{1,3}(?:\.\d{3})*,\d{2}-?|-?\d+,\d{2}-?"
 US_MONEY = r"-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}-?"
+SANTANDER_MONEY = re.compile(r"-?\$\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})")
 FULL_DATE = re.compile(r"^\s*(\d{1,2}/\d{1,2}/\d{2,4})\s+")
 MONTHS_EN = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
              "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
@@ -79,6 +80,8 @@ def _year_near(text: str) -> int | None:
 
 def detect_bank(text: str) -> str:
     top = re.sub(r"\s+", "", text[:30000].upper())
+    if "RESUMENDECUENTA" in top and ("BANCOSANTANDERARGENTINA" in top or "SANTANDER" in top):
+        return "Santander"
     if "FECHATRX" in top and "IMPORTEMO" in top and "SALDO_PROMEDIO" in top:
         return "Macro"
     if "BANCOGALICIA" in top or "RESUMENDECUENTACORRIENTEENPESOS" in top:
@@ -104,6 +107,7 @@ def _account(page: str, bank: str, previous: str = "") -> str:
         "HSBC": r"CUENTA CORRIENTE EN \$ NRO\.\s*([\d-]+)",
         "Patagonia": r"CUENTA CORRIENTE EN PESOS\s*([^\n]+)",
         "Comafi": r"Cuenta Corriente Bancaria Nro\.\s*([\d-]+)",
+        "Santander": r"Cuenta Corriente (?:en pesos )?N[º°]\s*([\d-]+(?:/\d+)?)",
     }
     match = re.search(patterns.get(bank, r"$^"), page, re.I | re.M)
     return re.sub(r"\s+", " ", match.group(1)).strip()[:80] if match else previous
@@ -365,6 +369,73 @@ def _parse_comafi_page(page: str, page_no: int, state: dict) -> tuple[list[dict]
     return [row for row in rows if row["Débito"] is not None or row["Crédito"] is not None], rejected
 
 
+def _parse_santander_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
+    """Parse Santander summaries while excluding tax recap and legal pages."""
+    rows, rejected = [], []
+    state["account"] = _account(page, "Santander", state.get("account", ""))
+    upper_page = page.upper()
+    if "MOVIMIENTOS" not in upper_page and "FECHA COMPROBANTE MOVIMIENTO" not in upper_page:
+        return rows, rejected
+
+    active = False
+    pending_date = None
+    last = None
+    for line in page.splitlines():
+        clean = line.strip()
+        upper = clean.upper()
+        if "FECHA" in upper and "COMPROBANTE" in upper and "MOVIMIENTO" in upper and "SALDO" in upper:
+            active = True
+            continue
+        if active and any(token in upper for token in ("DETALLE IMPOSITIVO", "SALDO TOTAL", "BANCO SANTANDER ARGENTINA S.A.")):
+            active = False
+        if not active or not clean:
+            continue
+
+        date_match = re.match(r"^(\d{1,2}/\d{1,2}/\d{2,4})(?:\s+(.*))?$", clean)
+        if date_match:
+            pending_date = _date(date_match.group(1))
+            remainder = (date_match.group(2) or "").strip()
+        else:
+            remainder = clean
+
+        amounts = list(SANTANDER_MONEY.finditer(line))
+        if not amounts:
+            if remainder and last is not None and not re.match(r"^(?:BANCO SANTANDER|\* SALVO|\d+\s*-\s*\d+)", upper):
+                last["Concepto"] = re.sub(r"\s+", " ", f'{last["Concepto"]} {remainder}').strip()
+            continue
+        if pending_date is None or "SALDO INICIAL" in upper or upper.startswith("RESPONSABLE:"):
+            continue
+        if len(amounts) < 2:
+            # Supporting lines may contain a taxable base but are not movements.
+            if last is not None and upper.startswith("RESPONSABLE:"):
+                last["Concepto"] = re.sub(r"\s+", " ", f'{last["Concepto"]} {remainder}').strip()
+            continue
+
+        transaction_amount, balance_amount = amounts[-2], amounts[-1]
+        amount = ar_number(transaction_amount.group())
+        balance = ar_number(balance_amount.group())
+        if transaction_amount.group().lstrip().startswith("-"):
+            amount = -abs(amount) if amount is not None else None
+        if balance_amount.group().lstrip().startswith("-"):
+            balance = -abs(balance) if balance is not None else None
+
+        prefix_start = (line.find(date_match.group(1)) + len(date_match.group(1))) if date_match else 0
+        prefix = line[prefix_start:transaction_amount.start()].strip()
+        operation_match = re.match(r"(\d+)\s+(.*)", prefix)
+        operation = operation_match.group(1) if operation_match else ""
+        concept = operation_match.group(2) if operation_match else prefix
+        # In Santander's fixed layout, the debit column begins before character 58.
+        is_debit = transaction_amount.start() < 58
+        last = {"Fecha": pending_date, "Operación": operation,
+                "Concepto": re.sub(r"\s+", " ", concept).strip(),
+                "Débito": abs(amount) if is_debit and amount is not None else None,
+                "Crédito": abs(amount) if not is_debit and amount is not None else None,
+                "Saldo": balance, "Origen": "", "Código trx": "", "Página": page_no,
+                "Cuenta": state.get("account", "")}
+        rows.append(last)
+    return rows, rejected
+
+
 def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
               progress: Callable[[int, int], None] | None = None):
     rows: list[dict] = []
@@ -378,7 +449,7 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
             sample_page.close()
         bank = forced_bank if forced_bank and forced_bank != "Automático" else detect_bank("\n".join(samples))
         parsers = {"BTF": _parse_btf_page, "Macro": _parse_macro_page, "HSBC": _parse_hsbc_page,
-                   "Comafi": _parse_comafi_page}
+                   "Comafi": _parse_comafi_page, "Santander": _parse_santander_page}
         for page_no, page in enumerate(pdf.pages, 1):
             if bank == "Macro":
                 text = ""

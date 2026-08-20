@@ -17,7 +17,7 @@ from supabase import Client, create_client
 from parsers import parse_pdf
 
 
-APP_VERSION = "Snoopy 2.0"
+APP_VERSION = "Snoopy 3.0"
 AUTHOR = "@PamperoSur"
 AUTHOR_CREDIT = "X: @PamperoSur · CAF"
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -32,7 +32,7 @@ DISCLAIMER = (
     "extracción, interpretación o decisiones tomadas con la información procesada."
 )
 
-st.set_page_config(page_title="Snoopy 2.0 | PDF bancario → Excel", page_icon="🏦", layout="wide")
+st.set_page_config(page_title="Snoopy 3.0 | PDF bancario → Excel", page_icon="🏦", layout="wide")
 
 st.markdown("""
 <style>
@@ -189,7 +189,7 @@ def hero(subtitle: str) -> None:
     <div class="hero">
       <div class="hero-copy"><div class="eyebrow">Intelligence workspace · Uso educativo</div>
       <h1>PDF bancario → Excel normalizado</h1><p>{subtitle}</p></div>
-      <div class="brand-lockup"><div class="brand-name">SNOOPY 2.0</div>
+      <div class="brand-lockup"><div class="brand-name">SNOOPY 3.0</div>
       <div class="brand-author">X: @PamperoSur</div>
       <div class="hero-meta">Corrientes · Argentina · {period_label()}</div></div>
     </div>""", unsafe_allow_html=True)
@@ -442,7 +442,7 @@ def champions_banner() -> None:
 def login_screen() -> None:
     hero("Extractor y herramienta de uso contable académico. Emprendedurismo (IA).")
     st.markdown(f"""<div class="status-grid">
-      <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">7 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
+      <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">8 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
       <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
       <div class="status-card"><div class="status-label">Robustez</div><div class="status-value">PDF de gran volumen</div><div class="status-note">Procesamiento página por página</div></div>
       <div class="status-card"><div class="status-label">Fiabilidad</div><div class="status-value">Salida normalizada</div><div class="status-note">Excel, CSV y control de filas</div></div>
@@ -567,7 +567,7 @@ def extractor_page() -> None:
       <div class="status-card"><div class="status-label">Seguridad</div><div class="status-value">Usuario autenticado</div><div class="status-note">Acceso y actividad registrados</div></div>
       <div class="status-card"><div class="status-label">Período operativo</div><div class="status-value">{period_label()}</div><div class="status-note">Actualización mensual automática</div></div>
     </div>""", unsafe_allow_html=True)
-    bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC"])
+    bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC", "Santander"])
     uploaded = st.file_uploader("Seleccionar un extracto PDF", type=["pdf"], accept_multiple_files=False)
     upload_token = (uploaded.name, uploaded.size) if uploaded else None
     previous_token = st.session_state.get("active_upload")
@@ -891,7 +891,7 @@ if user.get("must_change_password"):
     st.stop()
 
 with st.sidebar:
-    st.markdown("### Snoopy 2.0")
+    st.markdown("### Snoopy 3.0")
     st.caption(f"Extractor Bancario IA · {AUTHOR}")
     st.caption(f"{user['full_name']} · {user['role']}")
     age_days = password_age_days(user.get("password_changed_at"))
