@@ -5,6 +5,7 @@ import io
 import ipaddress
 import re
 import urllib.request
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -82,7 +83,8 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
  border:1px solid rgba(57,242,160,.38); background:linear-gradient(135deg,rgba(8,45,52,.88),rgba(7,29,49,.9));
  box-shadow:inset 0 1px rgba(255,255,255,.035),0 0 18px rgba(57,242,160,.045); }
 .workflow-number { display:grid; place-items:center; flex:0 0 25px; height:25px; border-radius:50%; color:#031a14;
- background:linear-gradient(135deg,#7dffc5,#27dfa0); font:800 .7rem 'IBM Plex Mono',monospace; box-shadow:0 0 12px rgba(57,242,160,.28); }
+ background:linear-gradient(135deg,#7dffc5,#27dfa0); font:800 .7rem 'IBM Plex Mono',monospace;
+ box-shadow:0 0 12px rgba(57,242,160,.28); }
 .workflow-text { color:#dffcf2; font-size:.72rem; font-weight:650; }
 .kpi-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; margin:1rem 0; }
 .kpi { padding:1rem 1.05rem; border-radius:15px; border:1px solid #285a78; background:linear-gradient(145deg,#0d2b46,#081e33);
@@ -144,9 +146,11 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {
  background:linear-gradient(90deg,#087fba 0%,#0db58e 58%,#39e99f 100%) !important; color:#fff !important;
  border:1px solid rgba(104,255,194,.72) !important; box-shadow:0 0 0 1px rgba(57,242,160,.12),0 0 18px rgba(57,242,160,.18) !important; }
-.stButton>button[kind="primary"]:hover, .stDownloadButton>button[kind="primary"]:hover { filter:brightness(1.12); border-color:#86ffca !important; box-shadow:0 0 24px rgba(57,242,160,.32) !important; }
+.stButton>button[kind="primary"]:hover, .stDownloadButton>button[kind="primary"]:hover {
+ filter:brightness(1.12); border-color:#86ffca !important; box-shadow:0 0 24px rgba(57,242,160,.32) !important; }
 button:focus, button:focus-visible, input:focus, [data-baseweb="select"]>div:focus-within,
-[data-testid="stFileUploader"]:focus-within { outline:none !important; border-color:#39f2a0 !important; box-shadow:0 0 0 2px rgba(57,242,160,.22) !important; }
+[data-testid="stFileUploader"]:focus-within { outline:none !important; border-color:#39f2a0 !important;
+ box-shadow:0 0 0 2px rgba(57,242,160,.22) !important; }
 input[type="checkbox"], input[type="radio"] { accent-color:#39f2a0 !important; }
 [data-baseweb="radio"]>div:first-child { border-color:#39f2a0 !important; }
 [data-baseweb="radio"]>div:first-child:after { background-color:#39f2a0 !important; }
@@ -572,6 +576,141 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
     return output.getvalue()
 
 
+def _safe_file_part(value: str) -> str:
+    """Return a portable filename component for ZIP downloads."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value)).strip("_")
+    return cleaned[:70] or "extracto"
+
+
+def _batch_report_workbook(report: pd.DataFrame) -> bytes:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        report.to_excel(writer, sheet_name="Informe del proceso", index=False)
+        ws = writer.book["Informe del proceso"]
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+        for cell in ws[1]:
+            cell.fill = PatternFill("solid", fgColor="123A59")
+            cell.font = Font(color="FFFFFF", bold=True)
+        for col in ws.columns:
+            ws.column_dimensions[col[0].column_letter].width = min(
+                max(len(str(cell.value or "")) for cell in col) + 2, 65)
+        headers = {cell.value: cell.column for cell in ws[1]}
+        for name in ("Total créditos", "Total débitos"):
+            if name in headers:
+                for column in ws.iter_cols(min_col=headers[name], max_col=headers[name], min_row=2):
+                    for cell in column:
+                        cell.number_format = '#,##0.00;[Red]-#,##0.00'
+    return output.getvalue()
+
+
+def multiple_extractor() -> None:
+    files = st.file_uploader(
+        "Seleccionar varios extractos PDF",
+        type=["pdf"], accept_multiple_files=True, key="batch_uploader",
+        help="Máximo 10 archivos, 60 MB por PDF y 150 MB por lote.",
+    )
+    token = tuple((item.name, item.size) for item in files) if files else ()
+    if token != st.session_state.get("batch_token", ()):
+        st.session_state.pop("batch_result", None)
+        st.session_state.batch_token = token
+
+    if files:
+        total_mb = sum(item.size for item in files) / (1024 * 1024)
+        st.caption(f"{len(files)} archivo(s) seleccionados · {total_mb:.1f} MB en total")
+    if files and st.button("Convertir lote", type="primary", width="stretch"):
+        if len(files) > 10:
+            st.error("El lote admite como máximo 10 PDF.")
+            return
+        oversized = [item.name for item in files if item.size > 60 * 1024 * 1024]
+        if oversized:
+            st.error(f"Superan 60 MB: {', '.join(oversized)}")
+            return
+        if sum(item.size for item in files) > 150 * 1024 * 1024:
+            st.error("El lote completo supera el límite operativo de 150 MB.")
+            return
+
+        report_rows = []
+        archive_buffer = io.BytesIO()
+        success_count = 0
+        progress_bar = st.progress(0.0, text="Preparando el lote…")
+        with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for file_index, item in enumerate(files):
+                try:
+                    def update_batch_progress(done: int, total: int, index: int = file_index) -> None:
+                        fraction = (index + (done / max(total, 1))) / len(files)
+                        progress_bar.progress(
+                            min(fraction, 1.0),
+                            text=f"Archivo {index + 1} de {len(files)} · página {done} de {total}",
+                        )
+
+                    bank, frame, rejected = parse_pdf(item.getvalue(), "Automático", update_batch_progress)
+                    if frame.empty:
+                        raise ValueError(f"No se detectaron movimientos para el lector {bank}.")
+                    full, credits, monthly = analyze_movements(frame)
+                    grouped = credits.groupby(
+                        ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
+                        dropna=False, as_index=False,
+                    ).agg(Acreditaciones=("Crédito", "size"),
+                          Total_acreditado=("Crédito", "sum")).sort_values("Total_acreditado", ascending=False)
+                    workbook = export_workbook(bank, full, credits, grouped, monthly, rejected)
+                    excel_name = (
+                        f"{file_index + 1:02d}_{_safe_file_part(bank)}_"
+                        f"{_safe_file_part(Path(item.name).stem)}_normalizado.xlsx"
+                    )
+                    archive.writestr(excel_name, workbook)
+                    success_count += 1
+                    st.session_state.conversions_session += 1
+                    log_access(st.session_state.user["username"], True, "PDF_PROCESSED")
+                    report_rows.append({
+                        "Archivo original": item.name, "Banco detectado": bank, "Estado": "Correcto",
+                        "Movimientos": len(full), "Acreditaciones": len(credits),
+                        "Total créditos": pd.to_numeric(full["Crédito"], errors="coerce").fillna(0).sum(),
+                        "Total débitos": pd.to_numeric(full["Débito"], errors="coerce").fillna(0).sum(),
+                        "Filas a revisar": len(rejected), "Excel generado": excel_name, "Detalle": "",
+                    })
+                except MemoryError:
+                    report_rows.append({
+                        "Archivo original": item.name, "Banco detectado": "N/D", "Estado": "Error",
+                        "Movimientos": 0, "Acreditaciones": 0, "Total créditos": 0,
+                        "Total débitos": 0, "Filas a revisar": 0, "Excel generado": "",
+                        "Detalle": "Memoria insuficiente; dividir el archivo por períodos.",
+                    })
+                except Exception as exc:
+                    report_rows.append({
+                        "Archivo original": item.name, "Banco detectado": "N/D", "Estado": "Error",
+                        "Movimientos": 0, "Acreditaciones": 0, "Total créditos": 0,
+                        "Total débitos": 0, "Filas a revisar": 0, "Excel generado": "",
+                        "Detalle": str(exc)[:300],
+                    })
+                finally:
+                    progress_bar.progress(
+                        (file_index + 1) / len(files),
+                        text=f"Procesados {file_index + 1} de {len(files)} archivos",
+                    )
+            report = pd.DataFrame(report_rows)
+            archive.writestr("informe_del_proceso.xlsx", _batch_report_workbook(report))
+        st.session_state.batch_result = (archive_buffer.getvalue(), pd.DataFrame(report_rows), success_count)
+
+    if "batch_result" in st.session_state:
+        archive_bytes, report, success_count = st.session_state.batch_result
+        failures = len(report) - success_count
+        if success_count:
+            st.success(f"Lote terminado: {success_count} Excel generados y {failures} archivo(s) con error.")
+        else:
+            st.error("No se pudo generar ningún Excel. Consultá el informe del proceso.")
+        st.dataframe(report, hide_index=True, width="stretch")
+        st.download_button(
+            "Bajar ZIP con los Excel",
+            archive_bytes,
+            "snoopy_3_0_extractos_normalizados.zip",
+            "application/zip",
+            type="primary", width="stretch",
+        )
+    elif not files:
+        st.info("Seleccioná hasta 10 PDF. Cada extracto generará su propio Excel normalizado.")
+
+
 def extractor_page() -> None:
     hero("Conversión prioritaria y análisis contable de acreditaciones, CUIT, fecha, monto y procedencia.")
     if "conversions_session" not in st.session_state:
@@ -583,9 +722,14 @@ def extractor_page() -> None:
     </div>""", unsafe_allow_html=True)
     st.markdown("""<div class="workflow-guide">
       <div class="workflow-step"><span class="workflow-number">1</span><span class="workflow-text">Elegí el banco o usá detección automática</span></div>
-      <div class="workflow-step"><span class="workflow-number">2</span><span class="workflow-text">Subí un único extracto bancario en PDF</span></div>
+      <div class="workflow-step"><span class="workflow-number">2</span><span class="workflow-text">Subí uno o varios extractos bancarios en PDF</span></div>
       <div class="workflow-step"><span class="workflow-number">3</span><span class="workflow-text">Convertí, controlá y bajá el Excel</span></div>
     </div>""", unsafe_allow_html=True)
+    mode = st.radio("Modalidad", ["Un PDF", "Varios PDF"], horizontal=True, label_visibility="collapsed")
+    if mode == "Varios PDF":
+        multiple_extractor()
+        academic_notice()
+        return
     bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC", "Santander"])
     uploaded = st.file_uploader("Seleccionar un extracto PDF", type=["pdf"], accept_multiple_files=False)
     upload_token = (uploaded.name, uploaded.size) if uploaded else None
