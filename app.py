@@ -490,7 +490,7 @@ def classify_origin(text: str) -> str:
     return next((label for token, label in rules if token in value), "Otro/N.D.")
 
 
-def analyze_movements(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def fiscalize(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     df = frame.copy()
     df["Año"] = df["Fecha"].dt.year
     df["Mes número"] = df["Fecha"].dt.month
@@ -559,7 +559,7 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
 
 
 def extractor_page() -> None:
-    hero("Conversión prioritaria y análisis contable de acreditaciones, CUIT, fecha, monto y procedencia.")
+    hero("Conversión prioritaria y análisis fiscalizador de acreditaciones, CUIT, fecha, monto y procedencia.")
     if "conversions_session" not in st.session_state:
         st.session_state.conversions_session = 0
     st.markdown(f"""<div class="status-grid">
@@ -590,7 +590,7 @@ def extractor_page() -> None:
                 progress_bar.progress(1.0, text="Extracción terminada")
                 if frame.empty:
                     raise ValueError(f"No se detectaron movimientos para el lector {bank}. Revisá la pestaña Control o elegí el banco manualmente.")
-                full, credits, monthly = analyze_movements(frame)
+                full, credits, monthly = fiscalize(frame)
                 grouped = credits.groupby(
                     ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
                     dropna=False, as_index=False
@@ -618,7 +618,7 @@ def extractor_page() -> None:
       <div class="kpi"><div class="kpi-label">Acreditaciones</div><div class="kpi-value">{credit_count}</div><div class="kpi-accent"></div></div>
       <div class="kpi"><div class="kpi-label">Total acreditado</div><div class="kpi-value" title="{money_ar(total_credits)}">{money_ar(total_credits)}</div><div class="kpi-accent"></div></div>
     </div>""", unsafe_allow_html=True)
-    tabs = st.tabs(["Movimientos", "Análisis de créditos", "Agrupaciones", "Control", "Descargas"])
+    tabs = st.tabs(["Movimientos", "Fiscalización de créditos", "Agrupaciones", "Control", "Descargas"])
     with tabs[0]:
         preview = full.head(2000)
         if len(full) > len(preview):
@@ -661,7 +661,7 @@ def extractor_page() -> None:
         if "downloads" in st.session_state:
             book, csv = st.session_state.downloads
             d1, d2 = st.columns(2)
-            d1.download_button("Bajar Excel", book, f"{bank.lower()}_normalizado.xlsx",
+            d1.download_button("Descargar Excel normalizado", book, f"{bank.lower()}_normalizado.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
             d2.download_button("Descargar créditos CSV", csv, f"{bank.lower()}_creditos.csv", "text/csv", width="stretch")
     academic_notice()
