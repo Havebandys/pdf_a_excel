@@ -37,7 +37,7 @@ st.set_page_config(page_title="Snoopy 3.0 | PDF bancario → Excel", page_icon="
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap');
-:root { --navy:#061525; --panel:#0a2139; --cyan:#48d7d0; --blue:#1597d5; --line:#245573; --muted:#9eb4c8; }
+:root { --navy:#061525; --panel:#0a2139; --cyan:#48d7d0; --blue:#1597d5; --neon:#39f2a0; --neon-dark:#0aae77; --line:#245573; --muted:#9eb4c8; }
 html, body, [class*="css"] { font-family:Inter,sans-serif; }
 [data-testid="stAppViewContainer"] { background:
  linear-gradient(rgba(34,86,119,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(34,86,119,.055) 1px,transparent 1px),
@@ -77,6 +77,13 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .status-label { color:#8faabd; font:600 .64rem 'IBM Plex Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
 .status-value { margin-top:.28rem; color:#f7fbff; font-size:1.08rem; font-weight:750; }
 .status-note { color:#6edfd7; font-size:.68rem; margin-top:.18rem; }
+.workflow-guide { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.55rem; margin:.15rem 0 .5rem; }
+.workflow-step { display:flex; align-items:center; gap:.65rem; min-height:42px; padding:.48rem .7rem; border-radius:11px;
+ border:1px solid rgba(57,242,160,.38); background:linear-gradient(135deg,rgba(8,45,52,.88),rgba(7,29,49,.9));
+ box-shadow:inset 0 1px rgba(255,255,255,.035),0 0 18px rgba(57,242,160,.045); }
+.workflow-number { display:grid; place-items:center; flex:0 0 25px; height:25px; border-radius:50%; color:#031a14;
+ background:linear-gradient(135deg,#7dffc5,#27dfa0); font:800 .7rem 'IBM Plex Mono',monospace; box-shadow:0 0 12px rgba(57,242,160,.28); }
+.workflow-text { color:#dffcf2; font-size:.72rem; font-weight:650; }
 .kpi-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; margin:1rem 0; }
 .kpi { padding:1rem 1.05rem; border-radius:15px; border:1px solid #285a78; background:linear-gradient(145deg,#0d2b46,#081e33);
  box-shadow:0 12px 30px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.04); }
@@ -135,9 +142,16 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 @keyframes champions { from { transform:translateX(-9%); } to { transform:translateX(9%); } }
 .stButton>button, .stDownloadButton>button { border-radius:9px; font-weight:700; min-height:2.65rem; }
 .stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"] {
- background:linear-gradient(90deg,#087ebc,#0da69c); color:#fff; border:0; }
+ background:linear-gradient(90deg,#087fba 0%,#0db58e 58%,#39e99f 100%) !important; color:#fff !important;
+ border:1px solid rgba(104,255,194,.72) !important; box-shadow:0 0 0 1px rgba(57,242,160,.12),0 0 18px rgba(57,242,160,.18) !important; }
+.stButton>button[kind="primary"]:hover, .stDownloadButton>button[kind="primary"]:hover { filter:brightness(1.12); border-color:#86ffca !important; box-shadow:0 0 24px rgba(57,242,160,.32) !important; }
+button:focus, button:focus-visible, input:focus, [data-baseweb="select"]>div:focus-within,
+[data-testid="stFileUploader"]:focus-within { outline:none !important; border-color:#39f2a0 !important; box-shadow:0 0 0 2px rgba(57,242,160,.22) !important; }
+input[type="checkbox"], input[type="radio"] { accent-color:#39f2a0 !important; }
+[data-baseweb="radio"]>div:first-child { border-color:#39f2a0 !important; }
+[data-baseweb="radio"]>div:first-child:after { background-color:#39f2a0 !important; }
 hr { border-color:#20425d; }
-@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0;align-self:auto}.hero-meta{text-align:left}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}}
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0;align-self:auto}.hero-meta{text-align:left}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.workflow-guide{grid-template-columns:1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}}
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
@@ -490,7 +504,7 @@ def classify_origin(text: str) -> str:
     return next((label for token, label in rules if token in value), "Otro/N.D.")
 
 
-def fiscalize(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def analyze_movements(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     df = frame.copy()
     df["Año"] = df["Fecha"].dt.year
     df["Mes número"] = df["Fecha"].dt.month
@@ -559,13 +573,18 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
 
 
 def extractor_page() -> None:
-    hero("Conversión prioritaria y análisis fiscalizador de acreditaciones, CUIT, fecha, monto y procedencia.")
+    hero("Conversión prioritaria y análisis contable de acreditaciones, CUIT, fecha, monto y procedencia.")
     if "conversions_session" not in st.session_state:
         st.session_state.conversions_session = 0
     st.markdown(f"""<div class="status-grid">
       <div class="status-card"><div class="status-label">Sesión actual</div><div class="status-value">{st.session_state.conversions_session} PDF procesados</div><div class="status-note">Sin persistencia documental</div></div>
       <div class="status-card"><div class="status-label">Seguridad</div><div class="status-value">Usuario autenticado</div><div class="status-note">Acceso y actividad registrados</div></div>
       <div class="status-card"><div class="status-label">Período operativo</div><div class="status-value">{period_label()}</div><div class="status-note">Actualización mensual automática</div></div>
+    </div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="workflow-guide">
+      <div class="workflow-step"><span class="workflow-number">1</span><span class="workflow-text">Elegí el banco o usá detección automática</span></div>
+      <div class="workflow-step"><span class="workflow-number">2</span><span class="workflow-text">Subí un único extracto bancario en PDF</span></div>
+      <div class="workflow-step"><span class="workflow-number">3</span><span class="workflow-text">Convertí, controlá y bajá el Excel</span></div>
     </div>""", unsafe_allow_html=True)
     bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC", "Santander"])
     uploaded = st.file_uploader("Seleccionar un extracto PDF", type=["pdf"], accept_multiple_files=False)
@@ -590,7 +609,7 @@ def extractor_page() -> None:
                 progress_bar.progress(1.0, text="Extracción terminada")
                 if frame.empty:
                     raise ValueError(f"No se detectaron movimientos para el lector {bank}. Revisá la pestaña Control o elegí el banco manualmente.")
-                full, credits, monthly = fiscalize(frame)
+                full, credits, monthly = analyze_movements(frame)
                 grouped = credits.groupby(
                     ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
                     dropna=False, as_index=False
@@ -618,7 +637,7 @@ def extractor_page() -> None:
       <div class="kpi"><div class="kpi-label">Acreditaciones</div><div class="kpi-value">{credit_count}</div><div class="kpi-accent"></div></div>
       <div class="kpi"><div class="kpi-label">Total acreditado</div><div class="kpi-value" title="{money_ar(total_credits)}">{money_ar(total_credits)}</div><div class="kpi-accent"></div></div>
     </div>""", unsafe_allow_html=True)
-    tabs = st.tabs(["Movimientos", "Fiscalización de créditos", "Agrupaciones", "Control", "Descargas"])
+    tabs = st.tabs(["Movimientos", "Análisis de créditos", "Agrupaciones", "Control", "Descargas"])
     with tabs[0]:
         preview = full.head(2000)
         if len(full) > len(preview):
@@ -661,7 +680,7 @@ def extractor_page() -> None:
         if "downloads" in st.session_state:
             book, csv = st.session_state.downloads
             d1, d2 = st.columns(2)
-            d1.download_button("Descargar Excel normalizado", book, f"{bank.lower()}_normalizado.xlsx",
+            d1.download_button("Bajar Excel", book, f"{bank.lower()}_normalizado.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", width="stretch")
             d2.download_button("Descargar créditos CSV", csv, f"{bank.lower()}_creditos.csv", "text/csv", width="stretch")
     academic_notice()
