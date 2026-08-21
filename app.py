@@ -18,7 +18,7 @@ from supabase import Client, create_client
 from parsers import parse_pdf
 
 
-APP_VERSION = "Snoopy IA X8"
+APP_VERSION = "Snoopy IA"
 AUTHOR = "@PamperoSur"
 AUTHOR_CREDIT = "X: @PamperoSur · CAF"
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -33,7 +33,7 @@ DISCLAIMER = (
     "extracción, interpretación o decisiones tomadas con la información procesada."
 )
 
-st.set_page_config(page_title="Snoopy IA X8 | PDF bancario → Excel", page_icon="🏦", layout="wide")
+st.set_page_config(page_title="Snoopy IA | PDF bancario → Excel", page_icon="🏦", layout="wide")
 
 st.markdown("""
 <style>
@@ -52,7 +52,7 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2rem; align-items:stretch; padding:1.6rem 1.75rem;
  border-radius:20px; border:1px solid #28617f; background:radial-gradient(circle at 83% 18%,rgba(24,184,190,.26),transparent 34%),linear-gradient(135deg,rgba(12,44,72,.98),rgba(7,27,47,.98));
  box-shadow:0 22px 60px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05); margin-bottom:.55rem; overflow:hidden; }
-.hero h1 { margin:.28rem 0 .5rem; color:#eaf5fb; font-size:clamp(1.75rem,3vw,2.45rem); letter-spacing:-.035em;
+.hero h1 { margin:.28rem 0 .5rem; color:#bdd5e1; font-size:clamp(1.75rem,3vw,2.45rem); letter-spacing:-.035em;
  text-shadow:0 2px 12px rgba(0,0,0,.38); }
 .title-arrow { color:#50ddd4; text-shadow:0 0 14px rgba(80,221,212,.2); }
 .hero p { margin:0; color:#b7cadb; max-width:900px; }
@@ -62,7 +62,6 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
  background:linear-gradient(105deg,#8ff8ef 0%,#48d7d0 38%,#55bfff 82%); -webkit-background-clip:text; background-clip:text; color:transparent;
  filter:drop-shadow(0 3px 10px rgba(0,0,0,.78)) drop-shadow(0 0 16px rgba(50,210,216,.18)); }
 .brand-ia { margin-left:.22em; }
-.brand-suffix { margin-left:.38em; color:#39dff2; font-size:.72em; letter-spacing:.035em; }
 .brand-author { margin-top:.58rem; color:#eaf8ff; font:600 .74rem 'IBM Plex Mono',monospace; letter-spacing:.045em;
  text-shadow:0 2px 8px rgba(0,0,0,.9); display:flex; align-items:center; justify-content:flex-end; gap:.48rem; }
 .brand-xicon { display:inline-grid; place-items:center; width:1.55rem; height:1.55rem; border:1px solid #46d9e8; border-radius:50%;
@@ -213,7 +212,7 @@ def hero(subtitle: str) -> None:
     <div class="hero">
       <div class="hero-copy"><div class="eyebrow">Intelligence workspace · Uso educativo</div>
       <h1>PDF bancario <span class="title-arrow">→</span> Excel normalizado</h1><p>{subtitle}</p></div>
-      <div class="brand-lockup"><div class="brand-name">SNOOPY<span class="brand-ia">IA</span><span class="brand-suffix">X8</span></div>
+      <div class="brand-lockup"><div class="brand-name">SNOOPY<span class="brand-ia">IA</span></div>
       <div class="brand-author"><span class="brand-xicon">X</span><span>@PamperoSur</span></div>
       <div class="hero-meta">Corrientes · Argentina · {period_label()}</div></div>
     </div>""", unsafe_allow_html=True)
@@ -1060,7 +1059,7 @@ if user.get("must_change_password"):
     st.stop()
 
 with st.sidebar:
-    st.markdown("### Snoopy IA X8")
+    st.markdown("### Snoopy IA")
     st.caption(f"Extractor Bancario IA · {AUTHOR}")
     st.caption(f"{user['full_name']} · {user['role']}")
     age_days = password_age_days(user.get("password_changed_at"))
