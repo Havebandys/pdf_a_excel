@@ -207,13 +207,17 @@ def period_label() -> str:
     return f"{MONTHS[value.month]} {value.year}"
 
 
-def hero(subtitle: str) -> None:
+def hero(subtitle: str, show_author: bool = True) -> None:
+    author_html = (
+        '<div class="brand-author"><span class="brand-xicon">X</span><span>@PamperoSur</span></div>'
+        if show_author else ""
+    )
     st.markdown(f"""
     <div class="hero">
       <div class="hero-copy"><div class="eyebrow">Intelligence workspace · Uso educativo</div>
       <h1>PDF bancario <span class="title-arrow">→</span> Excel normalizado</h1><p>{subtitle}</p></div>
       <div class="brand-lockup"><div class="brand-name">SNOOPY<span class="brand-ia">IA</span></div>
-      <div class="brand-author"><span class="brand-xicon">X</span><span>@PamperoSur</span></div>
+      {author_html}
       <div class="hero-meta">Corrientes · Argentina · {period_label()}</div></div>
     </div>""", unsafe_allow_html=True)
 
@@ -463,7 +467,7 @@ def champions_banner() -> None:
 
 
 def login_screen() -> None:
-    hero("Sistema inteligente de normalización bancaria")
+    hero("Sistema inteligente de normalización bancaria", show_author=False)
     st.markdown(f"""<div class="status-grid">
       <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">8 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
       <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
