@@ -133,12 +133,16 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 [data-testid="stAppViewContainer"]:has(.snoopy-login-page) .block-container > div:first-child {
  min-height:calc(100vh - clamp(36px,7.2vh,80px) - 1rem); display:flex; flex-direction:column; justify-content:center;
 }
-.snoopy-login-brand { margin:0 auto clamp(18px,3vh,32px); text-align:center; }
+.snoopy-login-brand { margin:0 auto clamp(14px,2.4vh,26px); text-align:center; }
 .snoopy-login-name {
  color:#9fdce8; font:800 clamp(2.3rem,4.5vw,4.15rem) 'IBM Plex Mono',monospace; line-height:1;
  letter-spacing:.1em; text-shadow:0 3px 18px rgba(0,0,0,.8),0 0 24px rgba(46,184,207,.18);
 }
 .snoopy-login-name span { color:#52d8cf; }
+.snoopy-login-subtitle {
+ margin-top:.62rem; color:#6fa9bd; font:600 clamp(.58rem,.78vw,.72rem) 'IBM Plex Mono',monospace;
+ letter-spacing:.2em; text-transform:uppercase;
+}
 .stColumn:has(.snoopy-login-card) [data-testid="stVerticalBlockBorderWrapper"] {
  min-height:0 !important; border:1px solid rgba(66,129,165,.82); border-radius:20px;
  background:linear-gradient(145deg,rgba(7,27,49,.94),rgba(3,15,29,.91));
@@ -147,6 +151,15 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 }
 .stColumn:has(.snoopy-login-card) [data-testid="stVerticalBlockBorderWrapper"] > div { padding:1.25rem 1.55rem 1.35rem; }
 .snoopy-login-card { display:none; }
+.snoopy-access-head { text-align:center; margin-bottom:.72rem; }
+.snoopy-access-symbol {
+ display:grid; place-items:center; width:48px; height:48px; margin:0 auto .65rem; border-radius:14px;
+ border:1px solid rgba(82,216,207,.72); color:#8eece6; font:700 1.25rem 'IBM Plex Mono',monospace;
+ background:linear-gradient(145deg,rgba(16,74,105,.72),rgba(8,39,67,.65));
+ box-shadow:0 0 18px rgba(72,215,208,.14),inset 0 1px rgba(255,255,255,.07);
+}
+.snoopy-access-title { color:#f0f7fb; font:700 clamp(1rem,1.25vw,1.18rem) 'IBM Plex Mono',monospace; letter-spacing:.1em; }
+.snoopy-access-note { margin-top:.28rem; color:#7897aa; font-size:.7rem; }
 .stColumn:has(.snoopy-login-card) .stTextInput { margin-bottom:-.15rem; }
 .stColumn:has(.snoopy-login-card) .stTextInput label { color:#bdd0dc; font-weight:600; }
 .stColumn:has(.snoopy-login-card) .stTextInput input {
@@ -157,6 +170,10 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
  border-color:#52d8cf !important; box-shadow:0 0 0 2px rgba(82,216,207,.16),0 0 16px rgba(82,216,207,.08) !important;
 }
 .stColumn:has(.snoopy-login-card) .stButton>button { margin-top:.2rem; letter-spacing:.08em; text-transform:uppercase; }
+.snoopy-access-foot {
+ margin-top:.72rem; text-align:center; color:#52778d; font:500 .57rem 'IBM Plex Mono',monospace;
+ letter-spacing:.12em; text-transform:uppercase;
+}
 .excel-visual { position:relative; min-height:410px; height:100%; border-radius:18px; border:1px solid #285b79; overflow:hidden;
  background:radial-gradient(circle at 50% 38%,rgba(31,190,185,.17),transparent 48%),linear-gradient(145deg,#0c2943,#071c30); padding:1rem; }
 .excel-visual:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent 52%,rgba(7,28,48,.95) 96%); pointer-events:none; }
@@ -214,7 +231,7 @@ input[type="checkbox"], input[type="radio"] { accent-color:#39f2a0 !important; }
 [data-baseweb="radio"]>div:first-child { border-color:#39f2a0 !important; }
 [data-baseweb="radio"]>div:first-child:after { background-color:#39f2a0 !important; }
 hr { border-color:#20425d; }
-@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0;align-self:auto}.brand-author{justify-content:flex-start}.hero-meta{text-align:left}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.workflow-guide{grid-template-columns:1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}.snoopy-login-name{font-size:2.25rem}.stColumn:has(.snoopy-login-card) [data-testid="stVerticalBlockBorderWrapper"]>div{padding:1rem 1.1rem}}
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0;align-self:auto}.brand-author{justify-content:flex-start}.hero-meta{text-align:left}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.workflow-guide{grid-template-columns:1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}.snoopy-login-name{font-size:2.25rem}.snoopy-login-subtitle{letter-spacing:.12em}.stColumn:has(.snoopy-login-card) [data-testid="stVerticalBlockBorderWrapper"]>div{padding:1rem 1.1rem}}
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
@@ -524,24 +541,42 @@ def login_screen() -> None:
     st.markdown("""
     <div class="snoopy-login-brand">
       <div class="snoopy-login-name">SNOOPY <span>IA</span></div>
+      <div class="snoopy-login-subtitle">Sistema inteligente de normalización bancaria</div>
     </div>
     """, unsafe_allow_html=True)
     left, center, right = st.columns([1.15, 1, 1.15], gap="large")
     with center:
         with st.container(border=True):
             st.markdown('<span class="snoopy-login-card"></span>', unsafe_allow_html=True)
+            st.markdown("""
+            <div class="snoopy-access-head">
+              <div class="snoopy-access-symbol">◇</div>
+              <div class="snoopy-access-title">ACCESO AUTORIZADO</div>
+              <div class="snoopy-access-note">Ingresá con tus credenciales habituales</div>
+            </div>
+            """, unsafe_allow_html=True)
             username = st.text_input("Usuario").strip().lower()
             password = st.text_input("Clave", type="password")
-            if st.button("Ingresar", type="primary", width="stretch"):
+            must_accept = acceptance_required(username)
+            accepted = True
+            if must_accept:
+                accepted = st.checkbox(
+                    "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso."
+                )
+                st.caption("Esta confirmación se solicita al primer ingreso, cada 10 accesos o después de cambiar la clave.")
+            if st.button("Ingresar", type="primary", width="stretch", disabled=not accepted):
                 try:
                     user = authenticate(username, password)
                     if user:
+                        if must_accept:
+                            log_access(username, True, "TERMS_ACCEPTED")
                         st.session_state.user = user
                         st.rerun()
                     else:
                         st.error("Usuario, clave o estado incorrecto.")
                 except Exception as exc:
                     st.error(f"No fue posible conectar con la base de usuarios: {exc}")
+            st.markdown('<div class="snoopy-access-foot">Entorno educativo · Procesamiento temporal</div>', unsafe_allow_html=True)
 
 
 def classify_origin(text: str) -> str:
