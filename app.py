@@ -103,6 +103,77 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .login-shell { padding:.05rem .25rem .35rem; }
 .login-kicker { color:#52d8cf; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; }
 .stColumn:has(.login-marker) [data-testid="stVerticalBlockBorderWrapper"] { min-height:410px; }
+.snoopy-login-page { display:none; }
+[data-testid="stAppViewContainer"]:has(.snoopy-login-page) {
+ height:100vh; min-height:100vh; overflow:hidden;
+ background:
+  radial-gradient(circle at 50% 49%,rgba(17,103,143,.22),transparent 24%),
+  radial-gradient(circle at 9% 30%,rgba(22,151,213,.14),transparent 28%),
+  radial-gradient(circle at 92% 68%,rgba(72,215,208,.12),transparent 27%),
+  linear-gradient(rgba(45,113,151,.07) 1px,transparent 1px),
+  linear-gradient(90deg,rgba(45,113,151,.07) 1px,transparent 1px),
+  linear-gradient(145deg,#020a14 0%,#06172a 48%,#03101d 100%) !important;
+ background-size:auto,auto,auto,42px 42px,42px 42px,auto !important;
+}
+[data-testid="stAppViewContainer"]:has(.snoopy-login-page)::before,
+[data-testid="stAppViewContainer"]:has(.snoopy-login-page)::after {
+ content:""; position:fixed; top:11vh; bottom:8vh; width:min(28vw,430px); pointer-events:none; opacity:.62;
+ background:
+  linear-gradient(180deg,transparent 0 12%,rgba(43,142,190,.18) 12% 12.35%,transparent 12.35% 25%,rgba(43,142,190,.13) 25% 25.3%,transparent 25.3%),
+  repeating-linear-gradient(90deg,transparent 0 24px,rgba(44,129,173,.11) 25px 26px),
+  radial-gradient(ellipse at center,rgba(17,109,151,.15),transparent 66%);
+ filter:drop-shadow(0 0 24px rgba(13,132,184,.08)); z-index:0;
+}
+[data-testid="stAppViewContainer"]:has(.snoopy-login-page)::before { left:0; clip-path:polygon(0 0,88% 8%,72% 100%,0 92%); }
+[data-testid="stAppViewContainer"]:has(.snoopy-login-page)::after { right:0; transform:scaleX(-1); clip-path:polygon(0 0,88% 8%,72% 100%,0 92%); }
+[data-testid="stAppViewContainer"]:has(.snoopy-login-page) .block-container {
+ position:relative; z-index:1; width:100%; max-width:1280px; height:100vh; min-height:100vh;
+ margin:0 auto !important; padding:clamp(18px,3.6vh,40px) 1.2rem 1rem !important;
+}
+[data-testid="stAppViewContainer"]:has(.snoopy-login-page) .block-container > div:first-child {
+ min-height:calc(100vh - clamp(36px,7.2vh,80px) - 1rem); display:flex; flex-direction:column; justify-content:center;
+}
+.snoopy-login-brand { margin:0 auto clamp(14px,2.4vh,26px); text-align:center; }
+.snoopy-login-name {
+ color:#9fdce8; font:800 clamp(2.3rem,4.5vw,4.15rem) 'IBM Plex Mono',monospace; line-height:1;
+ letter-spacing:.1em; text-shadow:0 3px 18px rgba(0,0,0,.8),0 0 24px rgba(46,184,207,.18);
+}
+.snoopy-login-name span { color:#52d8cf; }
+.snoopy-login-subtitle {
+ margin-top:.62rem; color:#6fa9bd; font:600 clamp(.58rem,.78vw,.72rem) 'IBM Plex Mono',monospace;
+ letter-spacing:.2em; text-transform:uppercase;
+}
+.stColumn:has(.snoopy-login-card) [data-testid="stVerticalBlockBorderWrapper"] {
+ min-height:0 !important; border:1px solid rgba(66,129,165,.82); border-radius:20px;
+ background:linear-gradient(145deg,rgba(7,27,49,.94),rgba(3,15,29,.91));
+ box-shadow:0 28px 72px rgba(0,0,0,.55),0 0 28px rgba(39,144,185,.10),inset 0 1px rgba(255,255,255,.055);
+ backdrop-filter:blur(13px);
+}
+.stColumn:has(.snoopy-login-card) [data-testid="stVerticalBlockBorderWrapper"] > div { padding:1.25rem 1.55rem 1.35rem; }
+.snoopy-login-card { display:none; }
+.snoopy-access-head { text-align:center; margin-bottom:.72rem; }
+.snoopy-access-symbol {
+ display:grid; place-items:center; width:48px; height:48px; margin:0 auto .65rem; border-radius:14px;
+ border:1px solid rgba(82,216,207,.72); color:#8eece6; font:700 1.25rem 'IBM Plex Mono',monospace;
+ background:linear-gradient(145deg,rgba(16,74,105,.72),rgba(8,39,67,.65));
+ box-shadow:0 0 18px rgba(72,215,208,.14),inset 0 1px rgba(255,255,255,.07);
+}
+.snoopy-access-title { color:#f0f7fb; font:700 clamp(1rem,1.25vw,1.18rem) 'IBM Plex Mono',monospace; letter-spacing:.1em; }
+.snoopy-access-note { margin-top:.28rem; color:#7897aa; font-size:.7rem; }
+.stColumn:has(.snoopy-login-card) .stTextInput { margin-bottom:-.15rem; }
+.stColumn:has(.snoopy-login-card) .stTextInput label { color:#bdd0dc; font-weight:600; }
+.stColumn:has(.snoopy-login-card) .stTextInput input {
+ min-height:3rem; color:#eef9ff; background:rgba(4,18,35,.9); border:1px solid #2b526e; border-radius:10px !important;
+ box-shadow:inset 0 1px rgba(255,255,255,.025);
+}
+.stColumn:has(.snoopy-login-card) .stTextInput input:focus {
+ border-color:#52d8cf !important; box-shadow:0 0 0 2px rgba(82,216,207,.16),0 0 16px rgba(82,216,207,.08) !important;
+}
+.stColumn:has(.snoopy-login-card) .stButton>button { margin-top:.2rem; letter-spacing:.08em; text-transform:uppercase; }
+.snoopy-access-foot {
+ margin-top:.72rem; text-align:center; color:#52778d; font:500 .57rem 'IBM Plex Mono',monospace;
+ letter-spacing:.12em; text-transform:uppercase;
+}
 .excel-visual { position:relative; min-height:410px; height:100%; border-radius:18px; border:1px solid #285b79; overflow:hidden;
  background:radial-gradient(circle at 50% 38%,rgba(31,190,185,.17),transparent 48%),linear-gradient(145deg,#0c2943,#071c30); padding:1rem; }
 .excel-visual:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent 52%,rgba(7,28,48,.95) 96%); pointer-events:none; }
@@ -160,7 +231,7 @@ input[type="checkbox"], input[type="radio"] { accent-color:#39f2a0 !important; }
 [data-baseweb="radio"]>div:first-child { border-color:#39f2a0 !important; }
 [data-baseweb="radio"]>div:first-child:after { background-color:#39f2a0 !important; }
 hr { border-color:#20425d; }
-@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0;align-self:auto}.brand-author{justify-content:flex-start}.hero-meta{text-align:left}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.workflow-guide{grid-template-columns:1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}}
+@media(max-width:850px){.hero{grid-template-columns:1fr}.brand-lockup{text-align:left;min-width:0;align-self:auto}.brand-author{justify-content:flex-start}.hero-meta{text-align:left}.status-grid,.kpi-grid{grid-template-columns:1fr 1fr}.workflow-guide{grid-template-columns:1fr}.excel-visual,.side-disclaimer{min-height:340px}.world-track{animation:none}.snoopy-login-name{font-size:2.25rem}.snoopy-login-subtitle{letter-spacing:.12em}.stColumn:has(.snoopy-login-card) [data-testid="stVerticalBlockBorderWrapper"]>div{padding:1rem 1.1rem}}
 @media(max-width:560px){.status-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 """, unsafe_allow_html=True)
@@ -466,21 +537,24 @@ def champions_banner() -> None:
 
 
 def login_screen() -> None:
-    hero("Sistema inteligente de normalización bancaria", show_author=False)
-    st.markdown(f"""<div class="status-grid">
-      <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">8 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
-      <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
-      <div class="status-card"><div class="status-label">Robustez</div><div class="status-value">PDF de gran volumen</div><div class="status-note">Procesamiento página por página</div></div>
-      <div class="status-card"><div class="status-label">Fiabilidad</div><div class="status-value">Salida normalizada</div><div class="status-note">Excel, CSV y control de filas</div></div>
-    </div>""", unsafe_allow_html=True)
-    visual, center, legal = st.columns(3, gap="medium")
-    with visual:
-        excel_preview()
+    st.markdown('<span class="snoopy-login-page"></span>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="snoopy-login-brand">
+      <div class="snoopy-login-name">SNOOPY <span>IA</span></div>
+      <div class="snoopy-login-subtitle">Sistema inteligente de normalización bancaria</div>
+    </div>
+    """, unsafe_allow_html=True)
+    left, center, right = st.columns([1.15, 1, 1.15], gap="large")
     with center:
         with st.container(border=True):
-            st.markdown('<span class="login-marker"></span>', unsafe_allow_html=True)
-            st.markdown('<div class="login-kicker">Acceso seguro · Control de usuarios</div>', unsafe_allow_html=True)
-            st.subheader("Ingreso de usuarios")
+            st.markdown('<span class="snoopy-login-card"></span>', unsafe_allow_html=True)
+            st.markdown("""
+            <div class="snoopy-access-head">
+              <div class="snoopy-access-symbol">◇</div>
+              <div class="snoopy-access-title">ACCESO AUTORIZADO</div>
+              <div class="snoopy-access-note">Ingresá con tus credenciales habituales</div>
+            </div>
+            """, unsafe_allow_html=True)
             username = st.text_input("Usuario").strip().lower()
             password = st.text_input("Clave", type="password")
             must_accept = acceptance_required(username)
@@ -502,9 +576,7 @@ def login_screen() -> None:
                         st.error("Usuario, clave o estado incorrecto.")
                 except Exception as exc:
                     st.error(f"No fue posible conectar con la base de usuarios: {exc}")
-    with legal:
-        side_disclaimer()
-    champions_banner()
+            st.markdown('<div class="snoopy-access-foot">Entorno educativo · Procesamiento temporal</div>', unsafe_allow_html=True)
 
 
 def classify_origin(text: str) -> str:
