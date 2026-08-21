@@ -157,7 +157,18 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .stColumn:has(.snoopy-login-card) .stTextInput input:focus {
  border-color:#52d8cf !important; box-shadow:0 0 0 2px rgba(82,216,207,.16),0 0 16px rgba(82,216,207,.08) !important;
 }
-.stColumn:has(.snoopy-login-card) .stButton>button { margin-top:.2rem; letter-spacing:.08em; text-transform:uppercase; }
+.stColumn:has(.snoopy-login-card) .stButton>button,
+.stColumn:has(.snoopy-login-card) .stFormSubmitButton>button {
+ margin-top:.2rem; letter-spacing:.08em; text-transform:uppercase;
+ background:linear-gradient(90deg,#117fa8 0%,#12aaa4 55%,#2ac8a5 100%) !important;
+ color:#f4ffff !important; border:1px solid rgba(104,231,218,.72) !important;
+ box-shadow:0 0 0 1px rgba(82,216,207,.10),0 0 20px rgba(40,192,183,.16) !important;
+}
+.stColumn:has(.snoopy-login-card) .stButton>button:hover,
+.stColumn:has(.snoopy-login-card) .stFormSubmitButton>button:hover {
+ filter:brightness(1.1); border-color:#92f4e9 !important;
+ box-shadow:0 0 25px rgba(53,213,201,.28) !important;
+}
 .excel-visual { position:relative; min-height:410px; height:100%; border-radius:18px; border:1px solid #285b79; overflow:hidden;
  background:radial-gradient(circle at 50% 38%,rgba(31,190,185,.17),transparent 48%),linear-gradient(145deg,#0c2943,#071c30); padding:1rem; }
 .excel-visual:after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent 52%,rgba(7,28,48,.95) 96%); pointer-events:none; }
@@ -249,6 +260,32 @@ if _HERO_IMAGE:
     }}
     .hero > div:first-child {{ position:relative; z-index:2; }}
     .brand-lockup {{ position:relative; z-index:3; }}
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def _login_background_uri() -> str:
+    """Carga el fondo de acceso institucional desde un recurso local de la aplicación."""
+    image_path = Path(__file__).with_name("snoopy_login_background.webp")
+    try:
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        return f"data:image/webp;base64,{encoded}"
+    except OSError:
+        return ""
+
+
+_LOGIN_BACKGROUND = _login_background_uri()
+if _LOGIN_BACKGROUND:
+    st.markdown(f"""
+    <style>
+    [data-testid="stAppViewContainer"]:has(.snoopy-login-page) {{
+      background:
+        linear-gradient(180deg,rgba(1,9,19,.18),rgba(1,9,19,.36)),
+        radial-gradient(circle at 50% 48%,rgba(5,21,39,.10),rgba(2,11,23,.26) 44%,rgba(1,8,17,.44) 100%),
+        url('{_LOGIN_BACKGROUND}') center center/cover no-repeat fixed !important;
+    }}
+    [data-testid="stAppViewContainer"]:has(.snoopy-login-page)::before,
+    [data-testid="stAppViewContainer"]:has(.snoopy-login-page)::after {{ display:none !important; }}
     </style>
     """, unsafe_allow_html=True)
 
