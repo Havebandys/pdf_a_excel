@@ -421,7 +421,6 @@ def authenticate(username: str, password: str):
 def academic_notice() -> None:
     st.markdown(f"""
     <div class="legal"><div class="legal-title">Descargo de responsabilidad</div>
-    <span class="author">Autoría: {AUTHOR_CREDIT} · {period_label()}</span><br>
     <b>Emprendedurismo (IA) - Corrientes · {APP_VERSION} · USO EXCLUSIVAMENTE EDUCATIVO</b><br><br>
     {DISCLAIMER}</div>""", unsafe_allow_html=True)
 
