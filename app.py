@@ -52,8 +52,8 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .hero { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2rem; align-items:stretch; padding:1.6rem 1.75rem;
  border-radius:20px; border:1px solid #28617f; background:radial-gradient(circle at 83% 18%,rgba(24,184,190,.26),transparent 34%),linear-gradient(135deg,rgba(12,44,72,.98),rgba(7,27,47,.98));
  box-shadow:0 22px 60px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05); margin-bottom:.55rem; overflow:hidden; }
-.hero h1 { margin:.28rem 0 .5rem; color:#bdd5e1; font-size:clamp(1.75rem,3vw,2.45rem); letter-spacing:-.035em;
- text-shadow:0 2px 12px rgba(0,0,0,.38); }
+.hero h1 { margin:.28rem 0 .5rem; color:#9fb8ca; font-size:clamp(1.75rem,3vw,2.45rem); letter-spacing:-.035em;
+ font-weight:720; text-shadow:0 2px 10px rgba(0,0,0,.32); align-self:end; }
 .title-arrow { color:#50ddd4; text-shadow:0 0 14px rgba(80,221,212,.2); }
 .hero p { margin:0; color:#b7cadb; max-width:900px; }
 .eyebrow { color:#50d3c8; font-size:.76rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
@@ -66,8 +66,8 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
  text-shadow:0 2px 8px rgba(0,0,0,.9); display:flex; align-items:center; justify-content:flex-end; gap:.48rem; }
 .brand-xicon { display:inline-grid; place-items:center; width:1.55rem; height:1.55rem; border:1px solid #46d9e8; border-radius:50%;
  color:#fff; font-size:.9rem; line-height:1; box-shadow:0 0 14px rgba(70,217,232,.16); }
-.hero-copy { min-width:0; display:flex; flex-direction:column; }
-.hero-copy p { margin-top:auto; padding-top:.8rem; }
+.hero-copy { min-width:0; display:grid; grid-template-rows:auto 1fr auto; }
+.hero-copy p { margin-top:0; padding-top:.72rem; }
 .hero-meta { margin-top:.48rem; color:#78ddd7; text-align:right;
  font:600 .64rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; text-shadow:0 2px 8px rgba(0,0,0,.75); }
 .badge { display:inline-block; margin:.9rem .4rem 0 0; padding:.3rem .62rem; border-radius:999px; font-size:.72rem;
