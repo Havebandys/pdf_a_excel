@@ -99,7 +99,8 @@ html, body, [class*="css"] { font-family:Inter,sans-serif; }
 .kpi-accent { height:2px; width:34px; margin-top:.65rem; background:linear-gradient(90deg,#4bdbd2,#168ec8); border-radius:3px; }
 [data-testid="stFileUploader"] { background:#0b233a; border:1px dashed #37779d; border-radius:14px; padding:.5rem; }
 .stTextInput input, [data-baseweb="select"] > div { border-radius:10px !important; }
-.stTextInput input[aria-label="Usuario"] { text-transform:uppercase; letter-spacing:.045em; }
+.stTextInput input[aria-label="Usuario"],
+.stTextInput input[aria-label="Usuario autorizado"] { text-transform:uppercase; letter-spacing:.045em; }
 .login-shell { padding:.05rem .25rem .35rem; }
 .login-kicker { color:#52d8cf; font:600 .68rem 'IBM Plex Mono',monospace; letter-spacing:.11em; text-transform:uppercase; }
 .stColumn:has(.login-marker) [data-testid="stVerticalBlockBorderWrapper"] { min-height:410px; }
@@ -472,6 +473,27 @@ def authenticate(username: str, password: str):
     return None
 
 
+def gateway_user_authorized(username: str) -> bool:
+    """Comprueba silenciosamente que el usuario exista y esté habilitado."""
+    normalized = username.lower().strip()
+    if not normalized:
+        return False
+    try:
+        rows = (db().table("app_users")
+                .select("username,active,status,archived")
+                .eq("username", normalized)
+                .limit(1).execute().data or [])
+        if not rows:
+            return False
+        account = rows[0]
+        status = str(account.get("status") or "active").lower().strip()
+        blocked_states = {"blocked", "archived", "disabled", "paused", "inactive"}
+        return bool(account.get("active", False)) and not bool(account.get("archived", False)) \
+            and status not in blocked_states
+    except Exception:
+        return False
+
+
 def academic_notice() -> None:
     st.markdown(f"""
     <div class="legal"><div class="legal-title">Descargo de responsabilidad</div>
@@ -530,9 +552,19 @@ def gateway_screen() -> None:
     with center:
         with st.container(border=True):
             st.markdown('<span class="snoopy-login-card"></span>', unsafe_allow_html=True)
-            if st.button("Ingresar", type="primary", width="stretch", key="open_snoopy_login"):
-                st.session_state["snoopy_gateway_passed"] = True
-                st.rerun()
+            with st.form("snoopy_gateway_form", clear_on_submit=False):
+                gateway_username = st.text_input("Usuario autorizado", key="gateway_username")
+                submitted = st.form_submit_button("Continuar", type="primary", width="stretch")
+            if submitted:
+                normalized = gateway_username.lower().strip()
+                authorized = gateway_user_authorized(normalized)
+                log_access(normalized or "(vacío)", authorized, "GATEWAY_ACCESS")
+                if authorized:
+                    st.session_state["snoopy_gateway_passed"] = True
+                    st.session_state["snoopy_gateway_username"] = normalized
+                    st.rerun()
+                else:
+                    st.error("Acceso no habilitado.")
 
 
 def login_screen() -> None:
