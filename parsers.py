@@ -15,9 +15,6 @@ SANTANDER_MONEY = re.compile(r"-?\$\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})")
 FULL_DATE = re.compile(r"^\s*(\d{1,2}/\d{1,2}/\d{2,4})\s+")
 MONTHS_EN = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
              "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
-MONTHS_ES = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5,
-             "JUNIO": 6, "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9,
-             "SETIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12}
 
 
 def ar_number(value: str | None) -> float | None:
@@ -109,11 +106,31 @@ def _account(page: str, bank: str, previous: str = "") -> str:
         "BBVA": r"CC\s*\$\s*([\d-]+/\d)",
         "HSBC": r"CUENTA CORRIENTE EN \$ NRO\.\s*([\d-]+)",
         "Patagonia": r"CUENTA CORRIENTE EN PESOS\s*([^\n]+)",
-        "Comafi": r"(?:Cuenta Corriente Bancaria Nro\.|^\s*N[úu]mero)\s*([\d-]+)",
+        "Comafi": r"Cuenta Corriente Bancaria Nro\.\s*([\d-]+)",
         "Santander": r"Cuenta Corriente (?:en pesos )?N[º°]\s*([\d-]+(?:/\d+)?)",
+        "BTF": r"(?:CUENTA:[^\n]{0,120}?NRO:|NRO:)\s*([\d-]{6,})",
     }
     match = re.search(patterns.get(bank, r"$^"), page, re.I | re.M)
+    if not match:
+        generic = r"(?:CUENTA|CTA)\s*(?:CORRIENTE|CAJA\s+DE\s+AHORRO)?\s*(?:EN\s+(?:PESOS|\$))?\s*(?:N(?:RO)?[.°º]*|N[ÚU]MERO)?\s*[:#-]?\s*([\d-]{6,}(?:/\d+)?)"
+        match = re.search(generic, page, re.I | re.M)
     return re.sub(r"\s+", " ", match.group(1)).strip()[:80] if match else previous
+
+
+def _bbva_section_account(line: str) -> str | None:
+    """Return the account only for a real BBVA movement-section heading.
+
+    BBVA continuation pages can start with movements from the account opened on
+    the preceding page and introduce another account farther down.  Therefore a
+    page-wide search cannot safely decide the account for every row on the page.
+    """
+    match = re.match(
+        r"^\s*CC\s*(?:U\$S|\$)\s*([\d-]+/\d+)\s*"
+        r"\(\s*Cta\.?\s*Cte\.?\s*Bancaria\s*\)",
+        line,
+        re.I,
+    )
+    return match.group(1).strip() if match else None
 
 
 def _header_positions(page: str, bank: str) -> dict[str, int] | None:
@@ -139,13 +156,32 @@ def _header_positions(page: str, bank: str) -> dict[str, int] | None:
 def _parse_column_page(page: str, bank: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
     rows, rejected = [], []
     state["year"] = _year_near(page) or state.get("year")
-    state["account"] = _account(page, bank, state.get("account", ""))
+    # BBVA must keep the account inherited from the preceding page until a real
+    # movement-section heading is reached while reading from top to bottom.
+    # Other banks retain their established page-wide account detection.
+    if bank != "BBVA":
+        state["account"] = _account(page, bank, state.get("account", ""))
     pos = _header_positions(page, bank)
     if not pos:
         return rows, rejected
     active = False
     for line in page.splitlines():
         upper = line.upper()
+        if bank == "BBVA":
+            section_account = _bbva_section_account(line)
+            if section_account:
+                previous_account = state.get("account", "")
+                state["account"] = section_account
+                if section_account != previous_account:
+                    state.setdefault("account_transitions", []).append({
+                        "Página": page_no,
+                        "Cuenta anterior": previous_account or "N/D",
+                        "Cuenta nueva": section_account,
+                    })
+                # A new account section must expose its own column header before
+                # any following date-like line can be interpreted as a movement.
+                active = False
+                continue
         if "FECHA" in upper and "SALDO" in upper and ("DEBIT" in upper or "DÉBIT" in upper):
             active = True
             continue
@@ -314,6 +350,7 @@ def _parse_galicia_page(page: str, page_no: int, state: dict) -> tuple[list[dict
 
 def _parse_btf_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
     rows, rejected = [], []
+    state["account"] = _account(page, "BTF", state.get("account", ""))
     pattern = re.compile(rf"^\s*(?P<date>\d{{2}}/\d{{2}}/\d{{4}})\s+(?P<origin>\d+)\s+"
                          rf"(?P<body>.*?)\s+(?P<comp>\d+)\s+(?P<amount>{AR_MONEY})\s+"
                          rf"(?P<balance>{AR_MONEY})\s+(?P<trx>\d+)\s*$")
@@ -330,88 +367,43 @@ def _parse_btf_page(page: str, page_no: int, state: dict) -> tuple[list[dict], l
                      "Débito": abs(amount) if amount is not None and amount < 0 else None,
                      "Crédito": amount if amount is not None and amount >= 0 else None,
                      "Saldo": ar_number(match.group("balance")), "Origen": match.group("origin"),
-                     "Código trx": match.group("trx"), "Página": page_no})
+                     "Código trx": match.group("trx"), "Página": page_no,
+                     "Cuenta": state.get("account", "")})
     return rows, rejected
 
 
 def _parse_comafi_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
     rows, rejected = [], []
-    period_match = re.search(
-        r"\b(" + "|".join(MONTHS_ES) + r")\s*-\s*(20\d{2})\b", page, re.I
-    )
-    if period_match:
-        month = MONTHS_ES[period_match.group(1).upper()]
-        state["period"] = f"{int(period_match.group(2)):04d}-{month:02d}"
-
-    controls = state.setdefault("balance_controls", {})
+    state["account"] = _account(page, "Comafi", state.get("account", ""))
+    if "DETALLE DE MOVIMIENTOS" not in page.upper():
+        return rows, rejected
     active, last = False, None
-    positions = {"debit": 53, "credit": 63, "balance": 75}
     for line in page.splitlines():
         upper = line.upper()
-        account_match = re.search(r"^\s*N[ÚU]MERO\s+([\d-]+)\b", line, re.I)
-        if account_match:
-            state["account"] = account_match.group(1)
-            active = False
-            last = None
-            continue
         if "DETALLE DE MOVIMIENTOS" in upper:
             active = True
-            last = None
-            continue
-        if active and "FECHA" in upper and "DÉBITOS" in upper and "CRÉDITOS" in upper and "SALDO" in upper:
-            positions = {"debit": upper.find("DÉBITOS"), "credit": upper.find("CRÉDITOS"),
-                         "balance": upper.rfind("SALDO")}
             continue
         if active and any(token in upper for token in ("IMPUESTOS DEBITADOS", "RESUMEN DE SALDO", "VISA DEBITO")):
             active = False
         if not active:
             continue
-        account = state.get("account", "")
-        period = state.get("period", "")
-        key = (account, period)
-        if "SALDO ANTERIOR" in upper:
-            amounts = list(re.finditer(AR_MONEY, line))
-            if account and amounts:
-                controls.setdefault(key, {"Cuenta": account, "Período": period,
-                                          "Saldo inicial informado": None,
-                                          "Saldo final informado": None,
-                                          "Página inicial": page_no, "Página final": page_no})
-                controls[key]["Saldo inicial informado"] = ar_number(amounts[-1].group())
-                controls[key]["Página inicial"] = page_no
-            last = None
-            continue
-        if "SALDO AL:" in upper:
-            amounts = list(re.finditer(AR_MONEY, line))
-            if account and amounts:
-                controls.setdefault(key, {"Cuenta": account, "Período": period,
-                                          "Saldo inicial informado": None,
-                                          "Saldo final informado": None,
-                                          "Página inicial": page_no, "Página final": page_no})
-                controls[key]["Saldo final informado"] = ar_number(amounts[-1].group())
-                controls[key]["Página final"] = page_no
-            last = None
-            continue
-        if "SIN MOVIMIENTOS" in upper:
-            last = None
-            continue
         date_match = re.match(r"^\s*(\d{1,2}/\d{1,2}/\d{2,4})\s+(.*)$", line)
         money = list(re.finditer(AR_MONEY, line))
-        if date_match:
+        if date_match and "SALDO ANTERIOR" not in upper and "SALDO AL:" not in upper:
             prefix_end = money[0].start() if money else len(line)
             prefix = line[date_match.end(1):prefix_end].strip()
             ref_match = re.search(r"\s(\d{6,})\s*$", prefix)
             last = {"Fecha": _date(date_match.group(1)), "Operación": ref_match.group(1) if ref_match else "",
                     "Concepto": prefix[:ref_match.start()].strip() if ref_match else prefix,
                     "Débito": None, "Crédito": None, "Saldo": None, "Origen": "", "Código trx": "",
-                    "Página": page_no, "Cuenta": account, "Período": period}
+                    "Página": page_no, "Cuenta": state.get("account", "")}
             rows.append(last)
         if last is not None and money:
             for item in money:
                 value = ar_number(item.group())
-                kind = min(positions, key=lambda name: abs(item.start() - positions[name]))
-                if kind == "balance":
+                if item.start() >= 205:
                     last["Saldo"] = value
-                elif kind == "credit":
+                elif item.start() >= 175:
                     last["Crédito"] = abs(value) if value is not None else None
                 else:
                     last["Débito"] = abs(value) if value is not None else None
@@ -473,8 +465,17 @@ def _parse_santander_page(page: str, page_no: int, state: dict) -> tuple[list[di
         operation_match = re.match(r"(\d+)\s+(.*)", prefix)
         operation = operation_match.group(1) if operation_match else ""
         concept = operation_match.group(2) if operation_match else prefix
-        # In Santander's fixed layout, the debit column begins before character 58.
+        # Prefer the balance variation when available; otherwise preserve the PDF column position.
+        previous_balance = state.get("santander_balance")
         is_debit = transaction_amount.start() < 58
+        if previous_balance is not None and balance is not None and amount is not None:
+            movement = abs(amount)
+            delta = balance - previous_balance
+            debit_error = abs(delta + movement)
+            credit_error = abs(delta - movement)
+            tolerance = max(0.02, movement * 0.001)
+            if min(debit_error, credit_error) <= tolerance:
+                is_debit = debit_error < credit_error
         last = {"Fecha": pending_date, "Operación": operation,
                 "Concepto": re.sub(r"\s+", " ", concept).strip(),
                 "Débito": abs(amount) if is_debit and amount is not None else None,
@@ -588,31 +589,11 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
     if not frame.empty:
         for column in ("Débito", "Crédito", "Saldo"):
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        if "Cuenta" not in frame.columns:
+            frame["Cuenta"] = "N/D"
+        frame["Cuenta"] = frame["Cuenta"].fillna("").astype(str).str.strip().replace(
+            {"": "N/D", "nan": "N/D", "None": "N/D"}
+        )
         frame.insert(0, "Banco", bank)
         frame["Mes"] = frame["Fecha"].dt.to_period("M").astype(str)
-        if "Cuenta" not in frame.columns:
-            frame["Cuenta"] = "No detectada"
-        else:
-            frame["Cuenta"] = frame["Cuenta"].fillna("").astype(str).str.strip().replace("", "No detectada")
-        if "Período" not in frame.columns:
-            frame["Período"] = frame["Fecha"].dt.to_period("M").astype(str)
-        else:
-            frame["Período"] = frame["Período"].fillna("").astype(str)
-    controls = pd.DataFrame(state.get("balance_controls", {}).values())
-    if not controls.empty:
-        controls["Origen saldo final"] = "Informado en 'Saldo al'"
-        movement_balances = (
-            frame.dropna(subset=["Saldo"])
-            .sort_values(["Página", "Fecha"])
-            .groupby(["Cuenta", "Período"], dropna=False)["Saldo"]
-            .last()
-        ) if not frame.empty and "Período" in frame.columns else pd.Series(dtype=float)
-        for index, row in controls[controls["Saldo final informado"].isna()].iterrows():
-            key = (row["Cuenta"], row["Período"])
-            if key in movement_balances.index:
-                controls.at[index, "Saldo final informado"] = movement_balances.loc[key]
-                controls.at[index, "Origen saldo final"] = "Último saldo del detalle"
-            elif pd.notna(row["Saldo inicial informado"]):
-                controls.at[index, "Saldo final informado"] = row["Saldo inicial informado"]
-                controls.at[index, "Origen saldo final"] = "Sin movimientos; igual al inicial"
-    return bank, frame, pd.DataFrame(rejected), controls
+    return bank, frame, pd.DataFrame(rejected)
