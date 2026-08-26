@@ -15,6 +15,9 @@ SANTANDER_MONEY = re.compile(r"-?\$\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})")
 FULL_DATE = re.compile(r"^\s*(\d{1,2}/\d{1,2}/\d{2,4})\s+")
 MONTHS_EN = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
              "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+MONTHS_ES = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5,
+             "JUNIO": 6, "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9,
+             "SETIEMBRE": 9, "OCTUBRE": 10, "NOVIEMBRE": 11, "DICIEMBRE": 12}
 
 
 def ar_number(value: str | None) -> float | None:
@@ -106,7 +109,7 @@ def _account(page: str, bank: str, previous: str = "") -> str:
         "BBVA": r"CC\s*\$\s*([\d-]+/\d)",
         "HSBC": r"CUENTA CORRIENTE EN \$ NRO\.\s*([\d-]+)",
         "Patagonia": r"CUENTA CORRIENTE EN PESOS\s*([^\n]+)",
-        "Comafi": r"Cuenta Corriente Bancaria Nro\.\s*([\d-]+)",
+        "Comafi": r"(?:Cuenta Corriente Bancaria Nro\.|^\s*N[úu]mero)\s*([\d-]+)",
         "Santander": r"Cuenta Corriente (?:en pesos )?N[º°]\s*([\d-]+(?:/\d+)?)",
     }
     match = re.search(patterns.get(bank, r"$^"), page, re.I | re.M)
@@ -333,36 +336,82 @@ def _parse_btf_page(page: str, page_no: int, state: dict) -> tuple[list[dict], l
 
 def _parse_comafi_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
     rows, rejected = [], []
-    state["account"] = _account(page, "Comafi", state.get("account", ""))
-    if "DETALLE DE MOVIMIENTOS" not in page.upper():
-        return rows, rejected
+    period_match = re.search(
+        r"\b(" + "|".join(MONTHS_ES) + r")\s*-\s*(20\d{2})\b", page, re.I
+    )
+    if period_match:
+        month = MONTHS_ES[period_match.group(1).upper()]
+        state["period"] = f"{int(period_match.group(2)):04d}-{month:02d}"
+
+    controls = state.setdefault("balance_controls", {})
     active, last = False, None
+    positions = {"debit": 53, "credit": 63, "balance": 75}
     for line in page.splitlines():
         upper = line.upper()
+        account_match = re.search(r"^\s*N[ÚU]MERO\s+([\d-]+)\b", line, re.I)
+        if account_match:
+            state["account"] = account_match.group(1)
+            active = False
+            last = None
+            continue
         if "DETALLE DE MOVIMIENTOS" in upper:
             active = True
+            last = None
+            continue
+        if active and "FECHA" in upper and "DÉBITOS" in upper and "CRÉDITOS" in upper and "SALDO" in upper:
+            positions = {"debit": upper.find("DÉBITOS"), "credit": upper.find("CRÉDITOS"),
+                         "balance": upper.rfind("SALDO")}
             continue
         if active and any(token in upper for token in ("IMPUESTOS DEBITADOS", "RESUMEN DE SALDO", "VISA DEBITO")):
             active = False
         if not active:
             continue
+        account = state.get("account", "")
+        period = state.get("period", "")
+        key = (account, period)
+        if "SALDO ANTERIOR" in upper:
+            amounts = list(re.finditer(AR_MONEY, line))
+            if account and amounts:
+                controls.setdefault(key, {"Cuenta": account, "Período": period,
+                                          "Saldo inicial informado": None,
+                                          "Saldo final informado": None,
+                                          "Página inicial": page_no, "Página final": page_no})
+                controls[key]["Saldo inicial informado"] = ar_number(amounts[-1].group())
+                controls[key]["Página inicial"] = page_no
+            last = None
+            continue
+        if "SALDO AL:" in upper:
+            amounts = list(re.finditer(AR_MONEY, line))
+            if account and amounts:
+                controls.setdefault(key, {"Cuenta": account, "Período": period,
+                                          "Saldo inicial informado": None,
+                                          "Saldo final informado": None,
+                                          "Página inicial": page_no, "Página final": page_no})
+                controls[key]["Saldo final informado"] = ar_number(amounts[-1].group())
+                controls[key]["Página final"] = page_no
+            last = None
+            continue
+        if "SIN MOVIMIENTOS" in upper:
+            last = None
+            continue
         date_match = re.match(r"^\s*(\d{1,2}/\d{1,2}/\d{2,4})\s+(.*)$", line)
         money = list(re.finditer(AR_MONEY, line))
-        if date_match and "SALDO ANTERIOR" not in upper and "SALDO AL:" not in upper:
+        if date_match:
             prefix_end = money[0].start() if money else len(line)
             prefix = line[date_match.end(1):prefix_end].strip()
             ref_match = re.search(r"\s(\d{6,})\s*$", prefix)
             last = {"Fecha": _date(date_match.group(1)), "Operación": ref_match.group(1) if ref_match else "",
                     "Concepto": prefix[:ref_match.start()].strip() if ref_match else prefix,
                     "Débito": None, "Crédito": None, "Saldo": None, "Origen": "", "Código trx": "",
-                    "Página": page_no, "Cuenta": state.get("account", "")}
+                    "Página": page_no, "Cuenta": account, "Período": period}
             rows.append(last)
         if last is not None and money:
             for item in money:
                 value = ar_number(item.group())
-                if item.start() >= 205:
+                kind = min(positions, key=lambda name: abs(item.start() - positions[name]))
+                if kind == "balance":
                     last["Saldo"] = value
-                elif item.start() >= 175:
+                elif kind == "credit":
                     last["Crédito"] = abs(value) if value is not None else None
                 else:
                     last["Débito"] = abs(value) if value is not None else None
@@ -433,6 +482,64 @@ def _parse_santander_page(page: str, page_no: int, state: dict) -> tuple[list[di
                 "Saldo": balance, "Origen": "", "Código trx": "", "Página": page_no,
                 "Cuenta": state.get("account", "")}
         rows.append(last)
+        state["santander_balance"] = balance
+    return rows, rejected
+
+
+def _parse_santander_plain_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
+    """Fallback Santander parser independent from fixed character positions."""
+    rows, rejected = [], []
+    state["account"] = _account(page, "Santander", state.get("account", ""))
+    active = False
+    current_date = state.get("santander_date")
+    previous_balance = state.get("santander_balance")
+    for raw_line in page.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        upper = line.upper()
+        if "FECHA" in upper and "COMPROBANTE" in upper and "MOVIMIENTO" in upper and "SALDO" in upper:
+            active = True
+            continue
+        if active and any(token in upper for token in ("DETALLE IMPOSITIVO", "SALDO TOTAL", "BANCO SANTANDER ARGENTINA S.A.")):
+            active = False
+        if not active or not line:
+            continue
+        date_match = re.match(r"^(\d{1,2}/\d{1,2}/\d{2,4})(?:\s+(.*))?$", line)
+        remainder = line
+        if date_match:
+            current_date = _date(date_match.group(1))
+            state["santander_date"] = current_date
+            remainder = (date_match.group(2) or "").strip()
+        amounts = list(SANTANDER_MONEY.finditer(line))
+        if "SALDO INICIAL" in upper and amounts:
+            previous_balance = ar_number(amounts[-1].group())
+            if amounts[-1].group().lstrip().startswith("-"):
+                previous_balance = -abs(previous_balance)
+            state["santander_balance"] = previous_balance
+            continue
+        if current_date is None or len(amounts) < 2 or upper.startswith("RESPONSABLE:"):
+            if rows and not amounts and remainder and not re.match(r"^\d+\s*-\s*\d+$", remainder):
+                rows[-1]["Concepto"] = re.sub(r"\s+", " ", f'{rows[-1]["Concepto"]} {remainder}').strip()
+            continue
+        transaction_match, balance_match = amounts[-2], amounts[-1]
+        transaction = abs(ar_number(transaction_match.group()) or 0.0)
+        balance = ar_number(balance_match.group())
+        if balance_match.group().lstrip().startswith("-"):
+            balance = -abs(balance)
+        prefix = remainder[:max(0, transaction_match.start() - (len(line) - len(remainder)))].strip()
+        operation_match = re.match(r"(\d+)\s+(.*)", prefix)
+        operation = operation_match.group(1) if operation_match else ""
+        concept = operation_match.group(2) if operation_match else prefix
+        if previous_balance is not None and balance is not None:
+            is_credit = balance - previous_balance >= -0.01
+        else:
+            is_credit = any(token in upper for token in ("DEPOSITO", "ACREDIT", "TRANSFERENCIA RECIBIDA"))
+        rows.append({"Fecha": current_date, "Operación": operation,
+                     "Concepto": re.sub(r"\s+", " ", concept).strip(),
+                     "Débito": None if is_credit else transaction, "Crédito": transaction if is_credit else None,
+                     "Saldo": balance, "Origen": "", "Código trx": "", "Página": page_no,
+                     "Cuenta": state.get("account", "")})
+        previous_balance = balance
+        state["santander_balance"] = balance
     return rows, rejected
 
 
@@ -463,6 +570,9 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 page_rows, page_rejected = _parse_column_page(text, bank, page_no, state)
             elif bank not in {"Galicia", "Macro"} and bank in parsers:
                 page_rows, page_rejected = parsers[bank](text, page_no, state)
+                if bank == "Santander" and not page_rows:
+                    plain_text = page.extract_text() or ""
+                    page_rows, page_rejected = _parse_santander_plain_page(plain_text, page_no, state)
             elif bank not in {"Galicia", "Macro"}:
                 page_rows, page_rejected = [], []
             rows.extend(page_rows)
@@ -480,4 +590,29 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
         frame.insert(0, "Banco", bank)
         frame["Mes"] = frame["Fecha"].dt.to_period("M").astype(str)
-    return bank, frame, pd.DataFrame(rejected)
+        if "Cuenta" not in frame.columns:
+            frame["Cuenta"] = "No detectada"
+        else:
+            frame["Cuenta"] = frame["Cuenta"].fillna("").astype(str).str.strip().replace("", "No detectada")
+        if "Período" not in frame.columns:
+            frame["Período"] = frame["Fecha"].dt.to_period("M").astype(str)
+        else:
+            frame["Período"] = frame["Período"].fillna("").astype(str)
+    controls = pd.DataFrame(state.get("balance_controls", {}).values())
+    if not controls.empty:
+        controls["Origen saldo final"] = "Informado en 'Saldo al'"
+        movement_balances = (
+            frame.dropna(subset=["Saldo"])
+            .sort_values(["Página", "Fecha"])
+            .groupby(["Cuenta", "Período"], dropna=False)["Saldo"]
+            .last()
+        ) if not frame.empty and "Período" in frame.columns else pd.Series(dtype=float)
+        for index, row in controls[controls["Saldo final informado"].isna()].iterrows():
+            key = (row["Cuenta"], row["Período"])
+            if key in movement_balances.index:
+                controls.at[index, "Saldo final informado"] = movement_balances.loc[key]
+                controls.at[index, "Origen saldo final"] = "Último saldo del detalle"
+            elif pd.notna(row["Saldo inicial informado"]):
+                controls.at[index, "Saldo final informado"] = row["Saldo inicial informado"]
+                controls.at[index, "Origen saldo final"] = "Sin movimientos; igual al inicial"
+    return bank, frame, pd.DataFrame(rejected), controls
