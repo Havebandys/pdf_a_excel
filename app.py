@@ -670,7 +670,10 @@ def analyze_movements(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, 
     df["Banco receptor"] = df["Banco"]
     df["Banco origen"] = "N/D"
     df["Nombre/Procedencia detectada"] = df.apply(extract_name, axis=1)
-    preferred = ["Banco", "Cuenta", "Período", "Fecha", "Concepto", "Crédito", "Débito", "CUIT/DNI detectado",
+    if "Cuenta" not in df.columns:
+        df["Cuenta"] = "N/D"
+    df["Cuenta"] = df["Cuenta"].fillna("").astype(str).str.strip().replace({"": "N/D", "nan": "N/D", "None": "N/D"})
+    preferred = ["Banco", "Cuenta", "Fecha", "Concepto", "Crédito", "Débito", "CUIT/DNI detectado",
                  "Nombre/Procedencia detectada", "Procedencia", "Banco receptor", "Banco origen",
                  "Operación", "Página", "Año", "Mes", "Año-Mes", "Origen", "Código trx", "Saldo"]
     df = df[[c for c in preferred if c in df.columns] + [c for c in df.columns if c not in preferred]]
@@ -690,61 +693,86 @@ def extract_name(row) -> str:
     return "N/D"
 
 
-def build_balance_control(full: pd.DataFrame, extracted: pd.DataFrame) -> pd.DataFrame:
-    """Reconcile each account and statement period against bank-reported balances."""
-    columns = ["Cuenta", "Período", "Saldo inicial informado", "Total créditos",
-               "Total débitos", "Saldo final calculado", "Saldo final informado",
-               "Diferencia", "Estado", "Movimientos", "Origen saldo final",
-               "Página inicial", "Página final"]
-    if extracted is None or extracted.empty:
+def _balance_control(full: pd.DataFrame) -> pd.DataFrame:
+    """Reconcile opening balance, movements and closing balance for each account."""
+    columns = ["Cuenta", "Saldo inicial", "Total créditos", "Total débitos",
+               "Saldo final calculado", "Saldo final informado", "Diferencia",
+               "Filas con diferencia", "Resultado"]
+    if full.empty:
         return pd.DataFrame(columns=columns)
-    totals = (
-        full.groupby(["Cuenta", "Período"], dropna=False, as_index=False)
-        .agg(**{"Total créditos": ("Crédito", "sum"), "Total débitos": ("Débito", "sum"),
-                "Movimientos": ("Fecha", "size")})
-    ) if not full.empty and {"Cuenta", "Período"}.issubset(full.columns) else pd.DataFrame()
-    control = extracted.copy()
-    if totals.empty:
-        control["Total créditos"] = 0.0
-        control["Total débitos"] = 0.0
-        control["Movimientos"] = 0
-    else:
-        control = control.merge(totals, on=["Cuenta", "Período"], how="left")
-        control[["Total créditos", "Total débitos", "Movimientos"]] = control[
-            ["Total créditos", "Total débitos", "Movimientos"]
-        ].fillna(0)
-    control["Saldo final calculado"] = (
-        pd.to_numeric(control["Saldo inicial informado"], errors="coerce")
-        + pd.to_numeric(control["Total créditos"], errors="coerce")
-        - pd.to_numeric(control["Total débitos"], errors="coerce")
+
+    work = full.copy()
+    if "Cuenta" not in work.columns:
+        work["Cuenta"] = "N/D"
+    work["Cuenta"] = work["Cuenta"].fillna("").astype(str).str.strip().replace(
+        {"": "N/D", "nan": "N/D", "None": "N/D"}
     )
-    control["Diferencia"] = control["Saldo final calculado"] - pd.to_numeric(
-        control["Saldo final informado"], errors="coerce"
-    )
-    control["Diferencia"] = control["Diferencia"].where(control["Diferencia"].abs() >= 0.005, 0.0)
-    control["Estado"] = control["Diferencia"].map(
-        lambda value: "CONCILIA" if pd.notna(value) and abs(value) < 0.01 else "REVISAR"
-    )
-    return control[[name for name in columns if name in control.columns]].sort_values(
-        ["Cuenta", "Período"], ascending=[True, False]
-    )
+    for name in ("Crédito", "Débito", "Saldo"):
+        work[name] = pd.to_numeric(work.get(name), errors="coerce")
+
+    results = []
+    tolerance = 0.02
+    for account, group in work.groupby("Cuenta", sort=False, dropna=False):
+        group = group.reset_index(drop=True)
+        credit = group["Crédito"].fillna(0.0)
+        debit = group["Débito"].fillna(0.0)
+        balances = group["Saldo"]
+        informed_positions = [index for index, value in balances.items() if pd.notna(value)]
+        total_credit = float(credit.sum())
+        total_debit = float(debit.sum())
+
+        if not informed_positions:
+            results.append({"Cuenta": account, "Saldo inicial": None,
+                            "Total créditos": total_credit, "Total débitos": total_debit,
+                            "Saldo final calculado": None, "Saldo final informado": None,
+                            "Diferencia": None, "Filas con diferencia": None,
+                            "Resultado": "SIN SALDOS INFORMADOS"})
+            continue
+
+        first_position = informed_positions[0]
+        last_position = informed_positions[-1]
+        opening = float(balances.iloc[first_position]) - float(credit.iloc[:first_position + 1].sum()) + float(debit.iloc[:first_position + 1].sum())
+        informed_closing = float(balances.iloc[last_position])
+        calculated_closing = opening + total_credit - total_debit
+        difference = calculated_closing - informed_closing
+
+        row_differences = 0
+        previous_position = first_position
+        previous_balance = float(balances.iloc[first_position])
+        for position in informed_positions[1:]:
+            expected = previous_balance + float(credit.iloc[previous_position + 1:position + 1].sum()) - float(debit.iloc[previous_position + 1:position + 1].sum())
+            if abs(expected - float(balances.iloc[position])) > tolerance:
+                row_differences += 1
+            previous_position = position
+            previous_balance = float(balances.iloc[position])
+
+        result = "OK" if abs(difference) <= tolerance and row_differences == 0 else "REVISAR"
+        results.append({"Cuenta": account, "Saldo inicial": opening,
+                        "Total créditos": total_credit, "Total débitos": total_debit,
+                        "Saldo final calculado": calculated_closing,
+                        "Saldo final informado": informed_closing, "Diferencia": difference,
+                        "Filas con diferencia": row_differences, "Resultado": result})
+    return pd.DataFrame(results, columns=columns)
 
 
 def _account_sheet_name(account: str, used: set[str]) -> str:
-    base = re.sub(r"[\\/*?:\[\]]", "-", f"Mov {account or 'Sin cuenta'}")[:31]
-    name, suffix = base, 2
-    while name in used:
-        tail = f" {suffix}"
-        name = f"{base[:31 - len(tail)]}{tail}"
+    """Build a valid, unique Excel sheet name (maximum 31 characters)."""
+    cleaned = re.sub(r"[\\/*?:\[\]]", "-", str(account)).strip() or "N-D"
+    base = f"Cuenta {cleaned}"[:31]
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        tail = f" ({suffix})"
+        candidate = f"{base[:31 - len(tail)]}{tail}"
         suffix += 1
-    used.add(name)
-    return name
+    used.add(candidate)
+    return candidate
 
 
 def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
-                    grouped: pd.DataFrame, monthly: pd.DataFrame, rejected: pd.DataFrame,
-                    balance_control: pd.DataFrame) -> bytes:
+                    grouped: pd.DataFrame, monthly: pd.DataFrame, rejected: pd.DataFrame) -> bytes:
     output = io.BytesIO()
+    balance_control = _balance_control(full)
     control = pd.DataFrame({"Control": ["Aplicación", "Finalidad", "Autoría", "Entorno", "Emisión",
                                                 "Banco", "Movimientos", "Acreditaciones", "Total acreditado", "Filas a revisar"],
                             "Resultado": [f"Extractor Bancario IA - {APP_VERSION}", "Uso exclusivamente educativo",
@@ -758,12 +786,17 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
         control.to_excel(writer, sheet_name="Control", index=False)
         balance_control.to_excel(writer, sheet_name="Control de saldos", index=False)
         rejected.to_excel(writer, sheet_name="Revisar", index=False)
-        used_names = {ws.title for ws in writer.book.worksheets}
-        accounts = sorted(set(full.get("Cuenta", pd.Series(dtype=str)).fillna("").astype(str)) |
-                          set(balance_control.get("Cuenta", pd.Series(dtype=str)).fillna("").astype(str)))
-        for account in accounts:
-            account_rows = full[full["Cuenta"].fillna("").astype(str) == account] if "Cuenta" in full else full.iloc[0:0]
-            account_rows.to_excel(writer, sheet_name=_account_sheet_name(account, used_names), index=False)
+        if "Cuenta" in full.columns:
+            account_values = full["Cuenta"].fillna("").astype(str).str.strip().replace(
+                {"": "N/D", "nan": "N/D", "None": "N/D"}
+            )
+            if account_values.nunique(dropna=False) > 1:
+                used_names = {sheet.title for sheet in writer.book.worksheets}
+                for account in account_values.drop_duplicates():
+                    account_rows = full.loc[account_values.eq(account)].copy()
+                    account_rows.to_excel(
+                        writer, sheet_name=_account_sheet_name(account, used_names), index=False
+                    )
         for ws in writer.book.worksheets:
             ws.freeze_panes = "A2"
             ws.auto_filter.ref = ws.dimensions
@@ -778,23 +811,13 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
                 for column in ws.iter_cols(min_col=headers["Fecha"], max_col=headers["Fecha"], min_row=2):
                     for cell in column:
                         cell.number_format = "dd/mm/yyyy"
-            for name in ("Crédito", "Débito", "Saldo", "Total_acreditado", "Saldo inicial informado",
+            for name in ("Crédito", "Débito", "Saldo", "Total_acreditado", "Saldo inicial",
                          "Total créditos", "Total débitos", "Saldo final calculado",
                          "Saldo final informado", "Diferencia"):
                 if name in headers:
                     for column in ws.iter_cols(min_col=headers[name], max_col=headers[name], min_row=2):
                         for cell in column:
                             cell.number_format = '#,##0.00;[Red]-#,##0.00'
-            if "Estado" in headers:
-                for cell in ws.iter_cols(min_col=headers["Estado"], max_col=headers["Estado"], min_row=2):
-                    for item in cell:
-                        item.font = Font(color="008000" if item.value == "CONCILIA" else "C00000", bold=True)
-            if "Diferencia" in headers:
-                for cell in ws.iter_cols(min_col=headers["Diferencia"], max_col=headers["Diferencia"], min_row=2):
-                    for item in cell:
-                        if item.value not in (None, 0, 0.0):
-                            item.fill = PatternFill("solid", fgColor="FFC7CE")
-                            item.font = Font(color="9C0006", bold=True)
     return output.getvalue()
 
 
@@ -866,9 +889,7 @@ def multiple_extractor() -> None:
                             text=f"Archivo {index + 1} de {len(files)} · página {done} de {total}",
                         )
 
-                    bank, frame, rejected, extracted_balances = parse_pdf(
-                        item.getvalue(), "Automático", update_batch_progress
-                    )
+                    bank, frame, rejected = parse_pdf(item.getvalue(), "Automático", update_batch_progress)
                     if frame.empty:
                         raise ValueError(f"No se detectaron movimientos para el lector {bank}.")
                     full, credits, monthly = analyze_movements(frame)
@@ -877,10 +898,7 @@ def multiple_extractor() -> None:
                         dropna=False, as_index=False,
                     ).agg(Acreditaciones=("Crédito", "size"),
                           Total_acreditado=("Crédito", "sum")).sort_values("Total_acreditado", ascending=False)
-                    balance_control = build_balance_control(full, extracted_balances)
-                    workbook = export_workbook(
-                        bank, full, credits, grouped, monthly, rejected, balance_control
-                    )
+                    workbook = export_workbook(bank, full, credits, grouped, monthly, rejected)
                     excel_name = (
                         f"{file_index + 1:02d}_{_safe_file_part(bank)}_"
                         f"{_safe_file_part(Path(item.name).stem)}_normalizado.xlsx"
@@ -894,8 +912,6 @@ def multiple_extractor() -> None:
                         "Movimientos": len(full), "Acreditaciones": len(credits),
                         "Total créditos": pd.to_numeric(full["Crédito"], errors="coerce").fillna(0).sum(),
                         "Total débitos": pd.to_numeric(full["Débito"], errors="coerce").fillna(0).sum(),
-                        "Controles de saldo": len(balance_control),
-                        "Diferencias": int((balance_control["Estado"] == "REVISAR").sum()),
                         "Filas a revisar": len(rejected), "Excel generado": excel_name, "Detalle": "",
                     })
                 except MemoryError:
@@ -978,7 +994,7 @@ def extractor_page() -> None:
                 progress_bar = st.progress(0, text="Preparando el PDF…")
                 def update_progress(done: int, total: int) -> None:
                     progress_bar.progress(done / total, text=f"Procesando página {done} de {total}")
-                bank, frame, rejected, extracted_balances = parse_pdf(pdf_bytes, bank_choice, update_progress)
+                bank, frame, rejected = parse_pdf(pdf_bytes, bank_choice, update_progress)
                 progress_bar.progress(1.0, text="Extracción terminada")
                 if frame.empty:
                     raise ValueError(f"No se detectaron movimientos para el lector {bank}. Revisá la pestaña Control o elegí el banco manualmente.")
@@ -987,10 +1003,7 @@ def extractor_page() -> None:
                     ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
                     dropna=False, as_index=False
                 ).agg(Acreditaciones=("Crédito", "size"), Total_acreditado=("Crédito", "sum")).sort_values("Total_acreditado", ascending=False)
-                balance_control = build_balance_control(full, extracted_balances)
-                st.session_state.result = (
-                    uploaded.name, bank, full, credits, grouped, monthly, rejected, balance_control
-                )
+                st.session_state.result = (uploaded.name, bank, full, credits, grouped, monthly, rejected)
                 st.session_state.active_upload = upload_token
                 st.session_state.conversions_session += 1
                 st.session_state.pop("downloads", None)
@@ -1003,7 +1016,7 @@ def extractor_page() -> None:
         st.info("Subí un PDF. El documento y sus movimientos no se guardan en la base de usuarios.")
         academic_notice()
         return
-    _, bank, full, credits, grouped, monthly, rejected, balance_control = st.session_state.result
+    _, bank, full, credits, grouped, monthly, rejected = st.session_state.result
     total_credits = credits["Crédito"].sum()
     movement_count = f"{len(full):,}".replace(",", ".")
     credit_count = f"{len(credits):,}".replace(",", ".")
@@ -1040,13 +1053,6 @@ def extractor_page() -> None:
         st.markdown("#### Por mes")
         st.dataframe(clean_view(monthly), hide_index=True, width="stretch")
     with tabs[3]:
-        if not balance_control.empty:
-            differences = int((balance_control["Estado"] == "REVISAR").sum())
-            if differences:
-                st.error(f"Hay {differences} control(es) de saldo con diferencias.")
-            else:
-                st.success(f"Los {len(balance_control)} controles de saldo concilian.")
-            st.dataframe(clean_view(balance_control), hide_index=True, width="stretch")
         if rejected.empty:
             st.success("No se detectaron líneas dudosas.")
         else:
@@ -1057,7 +1063,7 @@ def extractor_page() -> None:
         if st.button("Preparar archivos de descarga", type="primary", width="stretch"):
             with st.spinner("Generando Excel y CSV…"):
                 st.session_state.downloads = (
-                    export_workbook(bank, full, credits, grouped, monthly, rejected, balance_control),
+                    export_workbook(bank, full, credits, grouped, monthly, rejected),
                     credits.to_csv(index=False, sep=";", decimal=",", date_format="%d/%m/%Y").encode("utf-8-sig"),
                 )
         if "downloads" in st.session_state:

@@ -92,7 +92,9 @@ def detect_bank(text: str) -> str:
         return "Patagonia"
     if "BBVABANCOFRANC" in top or "PYMESYNEGOCIOS" in top or "BANCOBBVAARGENTINA" in top:
         return "BBVA"
-    if "LISTADODEMOVIMIENTOSHIST" in top and "CODTRX" in top:
+    if (("LISTADODEMOVIMIENTOSHIST" in top and "CODTRX" in top)
+            or ("LIQUIDACIONDEPRESENTACIONDECUPONES" in top
+                and "BANCODETIERRADELFUEGO" in top)):
         return "BTF"
     if "BANCOCOMAFI" in top or "RESUMENDEOPERACIONES" in top:
         return "Comafi"
@@ -357,6 +359,10 @@ def _parse_btf_page(page: str, page_no: int, state: dict) -> tuple[list[dict], l
     for line in page.splitlines():
         if not FULL_DATE.match(line):
             continue
+        # BTF repeats the report emission date in the page header.  It is not a
+        # movement and must not inflate the "Revisar" sheet.
+        if re.fullmatch(r"\s*\d{1,2}/\d{1,2}/\d{4}\s*", line):
+            continue
         match = pattern.match(line)
         if not match:
             rejected.append({"Página": page_no, "Texto": line.strip(), "Motivo": "Columnas BTF no reconocidas"})
@@ -369,6 +375,69 @@ def _parse_btf_page(page: str, page_no: int, state: dict) -> tuple[list[dict], l
                      "Saldo": ar_number(match.group("balance")), "Origen": match.group("origin"),
                      "Código trx": match.group("trx"), "Página": page_no,
                      "Cuenta": state.get("account", "")})
+    return rows, rejected
+
+
+def _parse_btf_liquidation_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
+    """Parse one BTF merchant-card settlement as one bank accreditation.
+
+    These PDFs are not current-account statements: every page contains a
+    settlement plus a duplicate receipt.  Reading the transaction table would
+    duplicate amounts, so the authoritative values are the payment date,
+    settlement number, destination CBU and final net payment shown in the
+    settlement summary.
+    """
+    rows, rejected = [], []
+    if "LIQUIDACION DE PRESENTACION DE CUPONES" not in page.upper():
+        return rows, rejected
+
+    date_match = re.search(r"Fecha de pago:\s*(\d{1,2}/\d{1,2}/\d{4})", page, re.I)
+    liquidation_match = re.search(r"N\s*Liquidaci\S*:\s*([\d.]+)", page, re.I)
+    cbu_match = re.search(r"ACRED\s+EN\s+CBU\s+(\d{18,24})", page, re.I)
+    net_matches = re.findall(
+        rf"IMPORTE\s+NETO\s+DE\s+PAGOS\s+\$\s*({AR_MONEY})", page, re.I
+    )
+
+    missing = []
+    if not date_match:
+        missing.append("fecha de pago")
+    if not liquidation_match:
+        missing.append("número de liquidación")
+    if not cbu_match:
+        missing.append("CBU")
+    if not net_matches:
+        missing.append("importe neto")
+    if missing:
+        rejected.append({
+            "Página": page_no,
+            "Texto": "Liquidación BTF",
+            "Motivo": f"Faltan campos: {', '.join(missing)}",
+        })
+        return rows, rejected
+
+    amount = ar_number(net_matches[0])
+    if amount is None:
+        rejected.append({
+            "Página": page_no,
+            "Texto": net_matches[0],
+            "Motivo": "Importe neto BTF no reconocido",
+        })
+        return rows, rejected
+
+    account = cbu_match.group(1)
+    state["account"] = account
+    rows.append({
+        "Fecha": _date(date_match.group(1)),
+        "Operación": liquidation_match.group(1),
+        "Concepto": "LIQUIDACION DE TARJETAS A COMERCIOS",
+        "Débito": abs(amount) if amount < 0 else None,
+        "Crédito": amount if amount >= 0 else None,
+        "Saldo": None,
+        "Origen": "BTF TARJETAS",
+        "Código trx": "",
+        "Página": page_no,
+        "Cuenta": account,
+    })
     return rows, rejected
 
 
@@ -570,7 +639,10 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
             if bank in {"Patagonia", "BBVA"}:
                 page_rows, page_rejected = _parse_column_page(text, bank, page_no, state)
             elif bank not in {"Galicia", "Macro"} and bank in parsers:
-                page_rows, page_rejected = parsers[bank](text, page_no, state)
+                if bank == "BTF" and "LIQUIDACION DE PRESENTACION DE CUPONES" in text.upper():
+                    page_rows, page_rejected = _parse_btf_liquidation_page(text, page_no, state)
+                else:
+                    page_rows, page_rejected = parsers[bank](text, page_no, state)
                 if bank == "Santander" and not page_rows:
                     plain_text = page.extract_text() or ""
                     page_rows, page_rejected = _parse_santander_plain_page(plain_text, page_no, state)
