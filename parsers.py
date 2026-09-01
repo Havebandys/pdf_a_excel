@@ -211,10 +211,21 @@ def _parse_column_page(page: str, bank: str, page_no: int, state: dict) -> tuple
             rejected.append({"Página": page_no, "Texto": line.strip(), "Motivo": "Fecha no reconocida"})
             continue
         money = list(re.finditer(AR_MONEY, line))
-        assigned = [(item, min(("debit", "credit", "balance"), key=lambda key: abs(item.start() - pos[key]))) for item in money]
-        debit = next((ar_number(item.group()) for item, kind in assigned if kind == "debit"), None)
-        credit = next((ar_number(item.group()) for item, kind in assigned if kind == "credit"), None)
-        balance = next((ar_number(item.group()) for item, kind in assigned if kind == "balance"), None)
+        if bank == "BBVA" and len(money) >= 2:
+            # BBVA renders debits with an explicit minus sign and credits as
+            # positive amounts.  Long concepts can push the transaction amount
+            # toward the printed CRÉDITO position, so column proximity alone is
+            # unsafe.  The last amount is the running balance; the preceding
+            # signed amount is the transaction.
+            transaction = ar_number(money[-2].group())
+            balance = ar_number(money[-1].group())
+            debit = abs(transaction) if transaction is not None and transaction < 0 else None
+            credit = transaction if transaction is not None and transaction >= 0 else None
+        else:
+            assigned = [(item, min(("debit", "credit", "balance"), key=lambda key: abs(item.start() - pos[key]))) for item in money]
+            debit = next((ar_number(item.group()) for item, kind in assigned if kind == "debit"), None)
+            credit = next((ar_number(item.group()) for item, kind in assigned if kind == "credit"), None)
+            balance = next((ar_number(item.group()) for item, kind in assigned if kind == "balance"), None)
         if debit is None and credit is None:
             rejected.append({"Página": page_no, "Texto": line.strip(), "Motivo": "Movimiento sin débito ni crédito"})
             continue
