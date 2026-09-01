@@ -90,7 +90,14 @@ def detect_bank(text: str) -> str:
         return "HSBC"
     if "BANCOPATAGONIA" in top or "PATAGONIAE-BANK" in top:
         return "Patagonia"
-    if "BBVABANCOFRANC" in top or "PYMESYNEGOCIOS" in top or "BANCOBBVAARGENTINA" in top:
+    # Some BBVA PDFs expose the vertical legal footer backwards ("AVBB")
+    # instead of extracting "Banco BBVA Argentina" normally.  The customer
+    # service and movement-section markers remain readable and are specific
+    # enough to identify the statement safely.
+    if ("BBVABANCOFRANC" in top or "PYMESYNEGOCIOS" in top
+            or "BANCOBBVAARGENTINA" in top or "LINEABBVA" in top
+            or "WWW.BBVA.COM.AR" in top
+            or ("MOVIMIENTOSENCUENTAS" in top and "CTA.CTE.BANCARIA" in top)):
         return "BBVA"
     if (("LISTADODEMOVIMIENTOSHIST" in top and "CODTRX" in top)
             or ("LIQUIDACIONDEPRESENTACIONDECUPONES" in top
