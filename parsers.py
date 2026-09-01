@@ -142,6 +142,17 @@ def _bbva_section_account(line: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _bbva_statement_date(page: str) -> pd.Timestamp | None:
+    """Read the issue date embedded in BBVA's DIGITAL statement barcode."""
+    match = re.search(r"(20\d{6})\d?\s*DIGITAL", page, re.I)
+    if not match:
+        return None
+    try:
+        return pd.Timestamp(datetime.strptime(match.group(1), "%Y%m%d"))
+    except ValueError:
+        return None
+
+
 def _header_positions(page: str, bank: str) -> dict[str, int] | None:
     for line in page.splitlines():
         upper = line.upper()
@@ -164,7 +175,15 @@ def _header_positions(page: str, bank: str) -> dict[str, int] | None:
 
 def _parse_column_page(page: str, bank: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
     rows, rejected = [], []
-    state["year"] = _year_near(page) or state.get("year")
+    if bank == "BBVA":
+        statement_date = _bbva_statement_date(page)
+        if statement_date is not None:
+            state["bbva_statement_date"] = statement_date
+            state["year"] = statement_date.year
+        elif not state.get("year"):
+            state["year"] = _year_near(page)
+    else:
+        state["year"] = _year_near(page) or state.get("year")
     # BBVA must keep the account inherited from the preceding page until a real
     # movement-section heading is reached while reading from top to bottom.
     # Other banks retain their established page-wide account detection.
@@ -206,7 +225,13 @@ def _parse_column_page(page: str, bank: str, page_no: int, state: dict) -> tuple
         match = re.match(r"^\s*(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\s+", line)
         if not match or "SALDO ANTERIOR" in upper:
             continue
-        date_value = _date(match.group(1), state.get("year"))
+        default_year = state.get("year")
+        if bank == "BBVA" and len(match.group(1).split("/")) == 2:
+            issue_date = state.get("bbva_statement_date")
+            if issue_date is not None:
+                movement_month = int(match.group(1).split("/")[1])
+                default_year = issue_date.year - (1 if movement_month > issue_date.month else 0)
+        date_value = _date(match.group(1), default_year)
         if date_value is None:
             rejected.append({"Página": page_no, "Texto": line.strip(), "Motivo": "Fecha no reconocida"})
             continue
