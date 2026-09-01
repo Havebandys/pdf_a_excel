@@ -945,7 +945,7 @@ def multiple_extractor() -> None:
     files = st.file_uploader(
         "Seleccionar varios extractos PDF",
         type=["pdf"], accept_multiple_files=True, key="batch_uploader",
-        help="Máximo 10 archivos, 60 MB por PDF y 150 MB por lote.",
+        help="Máximo 20 archivos, 60 MB por PDF y 200 MB por lote.",
     )
     token = tuple((item.name, item.size) for item in files) if files else ()
     if token != st.session_state.get("batch_token", ()):
@@ -983,15 +983,15 @@ def multiple_extractor() -> None:
         key=f"batch_consolidate_{batch_output_mode}",
     )
     if files and st.button("Convertir lote", type="primary", width="stretch"):
-        if len(files) > 10:
-            st.error("El lote admite como máximo 10 PDF.")
+        if len(files) > 20:
+            st.error("El lote admite como máximo 20 PDF.")
             return
         oversized = [item.name for item in files if item.size > 60 * 1024 * 1024]
         if oversized:
             st.error(f"Superan 60 MB: {', '.join(oversized)}")
             return
-        if sum(item.size for item in files) > 150 * 1024 * 1024:
-            st.error("El lote completo supera el límite operativo de 150 MB.")
+        if sum(item.size for item in files) > 200 * 1024 * 1024:
+            st.error("El lote completo supera el límite operativo de 200 MB.")
             return
 
         report_rows = []
@@ -1187,7 +1187,7 @@ def multiple_extractor() -> None:
         )
     elif not files:
         st.info(
-            "Seleccioná hasta 10 PDF. En salida completa se genera un Excel por PDF; "
+            "Seleccioná hasta 20 PDF. En salida completa se genera un Excel por PDF; "
             "al fraccionar, Snoopy reúne los PDF distintos y genera períodos cronológicos sin superposición."
         )
 
