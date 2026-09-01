@@ -442,18 +442,55 @@ def _parse_btf_liquidation_page(page: str, page_no: int, state: dict) -> tuple[l
 
 
 def _parse_comafi_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
+    """Parse Comafi statements using the columns printed in each page header.
+
+    ``extract_text(layout=True)`` produces lines much shorter than the original
+    PDF coordinates, so fixed character offsets are not reliable.  The column
+    centres below are derived from the local ``Débitos / Créditos / Saldo``
+    header and therefore work across the different Comafi layouts in the same
+    historical PDF.
+    """
     rows, rejected = [], []
-    state["account"] = _account(page, "Comafi", state.get("account", ""))
-    if "DETALLE DE MOVIMIENTOS" not in page.upper():
-        return rows, rejected
     active, last = False, None
+    column_centres = state.get("comafi_column_centres")
+
     for line in page.splitlines():
         upper = line.upper()
+
+        # A statement can begin a second account halfway down the same page.
+        # Only this real section heading is allowed to change the active account;
+        # operation references must never be interpreted as account numbers.
+        account_match = re.search(r"^\s*N[ÚU]MERO\s+([\d-]+)\s+CBU\s*:", line, re.I)
+        if account_match:
+            state["account"] = account_match.group(1)
+            active = False
+            last = None
+            continue
+
         if "DETALLE DE MOVIMIENTOS" in upper:
             active = True
             continue
+
+        # Continuation pages do not always repeat DETALLE DE MOVIMIENTOS, but
+        # they do repeat the actual movement-column header.
+        if all(token in upper for token in ("FECHA", "CONCEPT", "DÉBITOS", "CRÉDITOS", "SALDO")) \
+                or all(token in upper for token in ("FECHA", "CONCEPT", "DEBITOS", "CREDITOS", "SALDO")):
+            debit_start = upper.find("DÉBITOS") if "DÉBITOS" in upper else upper.find("DEBITOS")
+            credit_start = upper.find("CRÉDITOS") if "CRÉDITOS" in upper else upper.find("CREDITOS")
+            balance_start = upper.rfind("SALDO")
+            column_centres = {
+                "Débito": debit_start + 3.5,
+                "Crédito": credit_start + 4.0,
+                "Saldo": balance_start + 2.5,
+            }
+            state["comafi_column_centres"] = column_centres
+            active = bool(state.get("account"))
+            last = None
+            continue
+
         if active and any(token in upper for token in ("IMPUESTOS DEBITADOS", "RESUMEN DE SALDO", "VISA DEBITO")):
             active = False
+            last = None
         if not active:
             continue
         date_match = re.match(r"^\s*(\d{1,2}/\d{1,2}/\d{2,4})\s+(.*)$", line)
@@ -467,15 +504,120 @@ def _parse_comafi_page(page: str, page_no: int, state: dict) -> tuple[list[dict]
                     "Débito": None, "Crédito": None, "Saldo": None, "Origen": "", "Código trx": "",
                     "Página": page_no, "Cuenta": state.get("account", "")}
             rows.append(last)
-        if last is not None and money:
+        if last is not None and money and column_centres:
             for item in money:
                 value = ar_number(item.group())
-                if item.start() >= 205:
+                item_centre = (item.start() + item.end()) / 2
+                column = min(column_centres, key=lambda name: abs(item_centre - column_centres[name]))
+                if column == "Saldo":
                     last["Saldo"] = value
-                elif item.start() >= 175:
+                elif column == "Crédito":
                     last["Crédito"] = abs(value) if value is not None else None
                 else:
                     last["Débito"] = abs(value) if value is not None else None
+    return [row for row in rows if row["Débito"] is not None or row["Crédito"] is not None], rejected
+
+
+def _parse_comafi_page_object(page_obj, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
+    """Parse Comafi from positioned PDF words instead of character offsets."""
+    rows, rejected = [], []
+    words = page_obj.extract_words(use_text_flow=False, keep_blank_chars=False) or []
+    grouped: list[list[dict]] = []
+    for word in sorted(words, key=lambda item: (round(item["top"], 1), item["x0"])):
+        if not grouped or abs(grouped[-1][0]["top"] - word["top"]) > 1.5:
+            grouped.append([word])
+        else:
+            grouped[-1].append(word)
+
+    active = False
+    # Some Comafi transactions continue on the following page: the dated line
+    # is at the bottom of one page and the beneficiary/amount is at the top of
+    # the next.  Keep the same row object in state so that amount is not lost.
+    last = state.get("comafi_last")
+    column_centres = state.get("comafi_x_centres")
+    for line_words in grouped:
+        line_words.sort(key=lambda item: item["x0"])
+        text = " ".join(item["text"] for item in line_words)
+        upper = text.upper()
+
+        account_match = re.search(r"\bN[ÚU]MERO\s+([\d-]+)\s+CBU\s*:", text, re.I)
+        if account_match:
+            state["account"] = account_match.group(1)
+            active = False
+            last = None
+            state["comafi_last"] = None
+            continue
+
+        if "DETALLE DE MOVIMIENTOS" in upper:
+            active = True
+            continue
+
+        header_words = {item["text"].upper(): item for item in line_words}
+        debit_header = header_words.get("DÉBITOS") or header_words.get("DEBITOS")
+        credit_header = header_words.get("CRÉDITOS") or header_words.get("CREDITOS")
+        balance_header = header_words.get("SALDO")
+        if "FECHA" in header_words and debit_header and credit_header and balance_header:
+            column_centres = {
+                "Débito": (debit_header["x0"] + debit_header["x1"]) / 2,
+                "Crédito": (credit_header["x0"] + credit_header["x1"]) / 2,
+                "Saldo": (balance_header["x0"] + balance_header["x1"]) / 2,
+            }
+            state["comafi_x_centres"] = column_centres
+            active = bool(state.get("account"))
+            continue
+
+        if active and any(token in upper for token in (
+                "IMPUESTOS DEBITADOS", "RESUMEN DE SALDO", "VISA DEBITO")):
+            active = False
+            last = None
+            state["comafi_last"] = None
+        if not active or not column_centres:
+            continue
+
+        date_match = re.match(r"^(\d{1,2}/\d{1,2}/\d{2,4})\b", text)
+        money_words = [item for item in line_words if re.fullmatch(AR_MONEY, item["text"])]
+        if "TRANSPORTE" in upper:
+            # Transporte is a page carry-forward marker, not the closing balance
+            # of the pending transaction printed immediately before it.
+            continue
+        if date_match and "SALDO ANTERIOR" not in upper and "SALDO AL:" not in upper:
+            first_money_x = min((item["x0"] for item in money_words), default=float("inf"))
+            prefix_words = [item["text"] for item in line_words
+                            if item["x0"] < first_money_x and item["text"] != date_match.group(1)]
+            prefix = " ".join(prefix_words).strip()
+            ref_match = re.search(r"\s(\d{6,})\s*$", prefix)
+            last = {
+                "Fecha": _date(date_match.group(1)),
+                "Operación": ref_match.group(1) if ref_match else "",
+                "Concepto": prefix[:ref_match.start()].strip() if ref_match else prefix,
+                "Débito": None,
+                "Crédito": None,
+                "Saldo": None,
+                "Origen": "",
+                "Código trx": "",
+                "Página": page_no,
+                "Cuenta": state.get("account", ""),
+            }
+            rows.append(last)
+            state["comafi_last"] = last
+
+        if last is not None:
+            if money_words and last not in rows and all(
+                    last.get(name) is None for name in ("Débito", "Crédito")):
+                rows.append(last)
+            for item in money_words:
+                value = ar_number(item["text"])
+                item_centre = (item["x0"] + item["x1"]) / 2
+                column = min(column_centres, key=lambda name: abs(item_centre - column_centres[name]))
+                if column == "Saldo":
+                    last["Saldo"] = value
+                elif column == "Crédito":
+                    last["Crédito"] = abs(value) if value is not None else None
+                else:
+                    last["Débito"] = abs(value) if value is not None else None
+
+    state["comafi_last"] = last
+
     return [row for row in rows if row["Débito"] is not None or row["Crédito"] is not None], rejected
 
 
@@ -631,6 +773,9 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
             if bank == "Macro":
                 text = ""
                 page_rows, page_rejected = _parse_macro_page_object(page, page_no, state)
+            elif bank == "Comafi":
+                text = ""
+                page_rows, page_rejected = _parse_comafi_page_object(page, page_no, state)
             elif bank == "Galicia":
                 text = page.extract_text() or ""
                 page_rows, page_rejected = _parse_galicia_page(text, page_no, state)
@@ -638,7 +783,7 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 text = page.extract_text(layout=True, x_density=7.25, y_density=13) or ""
             if bank in {"Patagonia", "BBVA"}:
                 page_rows, page_rejected = _parse_column_page(text, bank, page_no, state)
-            elif bank not in {"Galicia", "Macro"} and bank in parsers:
+            elif bank not in {"Galicia", "Macro", "Comafi"} and bank in parsers:
                 if bank == "BTF" and "LIQUIDACION DE PRESENTACION DE CUPONES" in text.upper():
                     page_rows, page_rejected = _parse_btf_liquidation_page(text, page_no, state)
                 else:
@@ -646,7 +791,7 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 if bank == "Santander" and not page_rows:
                     plain_text = page.extract_text() or ""
                     page_rows, page_rejected = _parse_santander_plain_page(plain_text, page_no, state)
-            elif bank not in {"Galicia", "Macro"}:
+            elif bank not in {"Galicia", "Macro", "Comafi"}:
                 page_rows, page_rejected = [], []
             rows.extend(page_rows)
             rejected.extend(page_rejected)
