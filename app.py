@@ -684,6 +684,35 @@ def analyze_movements(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, 
     return df, credits, monthly
 
 
+def split_movement_periods(full: pd.DataFrame, mode: str,
+                           months_per_file: int = 6) -> list[tuple[str, pd.DataFrame]]:
+    """Split normalized movements without deduplicating or cutting PDF pages."""
+    if full.empty or mode == "Un Excel completo":
+        return [("completo", full.copy())]
+    work = full.copy()
+    work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
+    work = work[work["Fecha"].notna()].copy()
+    if work.empty:
+        return [("sin_fecha", full.copy())]
+    if mode == "Separar el Excel por año":
+        return [
+            (str(int(year)), rows.copy())
+            for year, rows in work.groupby(work["Fecha"].dt.year, sort=True)
+        ]
+
+    months_per_file = max(1, min(int(months_per_file), 12))
+    month_index = work["Fecha"].dt.year * 12 + work["Fecha"].dt.month - 1
+    first_month = int(month_index.min())
+    work["_Bloque salida"] = ((month_index - first_month) // months_per_file).astype(int)
+    groups = []
+    for _, rows in work.groupby("_Bloque salida", sort=True):
+        rows = rows.drop(columns=["_Bloque salida"])
+        start = rows["Fecha"].min().strftime("%Y-%m")
+        end = rows["Fecha"].max().strftime("%Y-%m")
+        groups.append((f"{start}_a_{end}", rows.copy()))
+    return groups
+
+
 def extract_name(row) -> str:
     text = re.sub(r"\s+", " ", str(row.get("Concepto", ""))).strip()
     identifier = str(row.get("CUIT/DNI detectado", "N/D"))
@@ -872,10 +901,17 @@ def multiple_extractor() -> None:
         total_mb = sum(item.size for item in files) / (1024 * 1024)
         st.caption(f"{len(files)} archivo(s) seleccionados · {total_mb:.1f} MB en total")
     option_col1, option_col2 = st.columns(2)
-    split_by_year = option_col1.checkbox(
-        "Separar cada resultado por año",
-        help="Útil para extractos históricos extensos. Cada movimiento se asigna por su fecha.",
+    batch_output_mode = option_col1.selectbox(
+        "Organización de cada resultado",
+        ["Un Excel completo", "Separar el Excel por año", "Separar por bloques de meses"],
+        key="batch_output_mode",
     )
+    months_per_file = 6
+    if batch_output_mode == "Separar por bloques de meses":
+        months_per_file = option_col1.number_input(
+            "Meses por archivo", min_value=1, max_value=12, value=6, step=1,
+            key="batch_months_per_file",
+        )
     consolidate = option_col2.checkbox(
         "Generar también un Excel consolidado", value=True,
         help="Une todos los movimientos sin eliminar operaciones que parezcan repetidas.",
@@ -922,16 +958,19 @@ def multiple_extractor() -> None:
                         f"{_safe_file_part(Path(item.name).stem)}"
                     )
                     generated_names = []
-                    if split_by_year and not full.empty:
-                        for year, year_rows in full.groupby("Año", sort=True):
-                            year_full, year_credits, year_monthly = analyze_movements(year_rows.copy())
+                    period_groups = split_movement_periods(
+                        full, batch_output_mode, int(months_per_file)
+                    )
+                    if batch_output_mode != "Un Excel completo" and not full.empty:
+                        for period_name, period_rows in period_groups:
+                            year_full, year_credits, year_monthly = analyze_movements(period_rows.copy())
                             year_grouped = year_credits.groupby(
                                 ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
                                 dropna=False, as_index=False,
                             ).agg(Acreditaciones=("Crédito", "size"),
                                   Total_acreditado=("Crédito", "sum")).sort_values(
                                       "Total_acreditado", ascending=False)
-                            excel_name = f"{base_name}_{int(year)}_normalizado.xlsx"
+                            excel_name = f"{base_name}_{period_name}_normalizado.xlsx"
                             archive.writestr(
                                 excel_name,
                                 export_workbook(bank, year_full, year_credits, year_grouped,
@@ -1028,6 +1067,103 @@ def multiple_extractor() -> None:
         st.info("Seleccioná hasta 10 PDF. Cada extracto generará su propio Excel normalizado.")
 
 
+def excel_consolidator() -> None:
+    """Join previously normalized Snoopy workbooks without deleting similar rows."""
+    files = st.file_uploader(
+        "Seleccionar Excel normalizados de Snoopy",
+        type=["xlsx"], accept_multiple_files=True, key="excel_consolidator_uploader",
+        help="Subí entre 2 y 20 archivos. Se utiliza la hoja Movimientos de cada uno.",
+    )
+    token = tuple((item.name, item.size) for item in files) if files else ()
+    if token != st.session_state.get("excel_consolidator_token", ()):
+        st.session_state.pop("excel_consolidated_result", None)
+        st.session_state.excel_consolidator_token = token
+
+    if files:
+        st.caption(
+            f"{len(files)} archivo(s) seleccionados · "
+            f"{sum(item.size for item in files) / (1024 * 1024):.1f} MB en total"
+        )
+    if files and st.button("Consolidar Excel", type="primary", width="stretch"):
+        try:
+            if not 2 <= len(files) <= 20:
+                raise ValueError("Seleccioná entre 2 y 20 archivos Excel.")
+            frames = []
+            required = {"Fecha", "Concepto", "Crédito", "Débito"}
+            for item in files:
+                try:
+                    frame = pd.read_excel(io.BytesIO(item.getvalue()), sheet_name="Movimientos")
+                except ValueError as exc:
+                    raise ValueError(f"{item.name}: no contiene la hoja Movimientos.") from exc
+                missing = sorted(required - set(frame.columns))
+                if missing:
+                    raise ValueError(f"{item.name}: faltan columnas {', '.join(missing)}.")
+                parsed_dates = pd.to_datetime(frame["Fecha"], errors="coerce", dayfirst=True)
+                invalid_dates = int(parsed_dates.isna().sum())
+                if invalid_dates:
+                    raise ValueError(f"{item.name}: contiene {invalid_dates} fecha(s) inválida(s).")
+                frame["Fecha"] = parsed_dates
+                for column in ("Crédito", "Débito", "Saldo"):
+                    if column not in frame.columns:
+                        frame[column] = pd.NA
+                    frame[column] = pd.to_numeric(frame[column], errors="coerce")
+                if "Banco" not in frame.columns:
+                    frame["Banco"] = "N/D"
+                if "Cuenta" not in frame.columns:
+                    frame["Cuenta"] = "N/D"
+                frame["Archivo origen"] = item.name
+                frames.append(frame)
+
+            combined = pd.concat(frames, ignore_index=True, sort=False)
+            # Deliberately do not call drop_duplicates: bank statements may have
+            # legitimate equal-looking rows distinguished by operation/reference.
+            full, credits, monthly = analyze_movements(combined)
+            grouped = credits.groupby(
+                ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
+                dropna=False, as_index=False,
+            ).agg(Acreditaciones=("Crédito", "size"),
+                  Total_acreditado=("Crédito", "sum")).sort_values(
+                      "Total_acreditado", ascending=False)
+            banks = sorted(
+                value for value in full["Banco"].dropna().astype(str).unique()
+                if value and value not in {"N/D", "nan"}
+            )
+            bank_label = banks[0] if len(banks) == 1 else "Consolidado"
+            workbook = export_workbook(
+                bank_label, full, credits, grouped, monthly, pd.DataFrame()
+            )
+            st.session_state.excel_consolidated_result = (
+                workbook, len(full), len(credits),
+                float(pd.to_numeric(full["Crédito"], errors="coerce").fillna(0).sum()),
+                float(pd.to_numeric(full["Débito"], errors="coerce").fillna(0).sum()),
+            )
+        except Exception as exc:
+            st.error(f"No se pudieron consolidar los Excel: {exc}")
+
+    if "excel_consolidated_result" in st.session_state:
+        workbook, movements, credit_count, total_credit, total_debit = (
+            st.session_state.excel_consolidated_result
+        )
+        st.success(
+            f"Consolidación terminada: {movements:,} movimientos y "
+            f"{credit_count:,} acreditaciones.".replace(",", ".")
+        )
+        summary = pd.DataFrame({
+            "Control": ["Archivos consolidados", "Movimientos", "Acreditaciones",
+                        "Total créditos", "Total débitos", "Filas eliminadas"],
+            "Resultado": [len(files), movements, credit_count, total_credit, total_debit, 0],
+        })
+        st.dataframe(summary, hide_index=True, width="stretch")
+        st.download_button(
+            "Bajar Excel consolidado", workbook,
+            "snoopy_consolidado_extractos_normalizados.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary", width="stretch",
+        )
+    elif not files:
+        st.info("Subí los Excel normalizados que quieras unir en un único archivo.")
+
+
 def extractor_page() -> None:
     hero("Sistema inteligente de normalización bancaria")
     if "conversions_session" not in st.session_state:
@@ -1042,7 +1178,14 @@ def extractor_page() -> None:
       <div class="workflow-step"><span class="workflow-number">2</span><span class="workflow-text">Subí uno o varios extractos bancarios en PDF</span></div>
       <div class="workflow-step"><span class="workflow-number">3</span><span class="workflow-text">Convertí, controlá y bajá el Excel</span></div>
     </div>""", unsafe_allow_html=True)
-    mode = st.radio("Modalidad", ["Un PDF", "Varios PDF"], horizontal=True, label_visibility="collapsed")
+    mode = st.radio(
+        "Modalidad", ["Un PDF", "Varios PDF", "Consolidar Excel"],
+        horizontal=True, label_visibility="collapsed",
+    )
+    if mode == "Consolidar Excel":
+        excel_consolidator()
+        academic_notice()
+        return
     if mode == "Varios PDF":
         multiple_extractor()
         academic_notice()
@@ -1050,9 +1193,15 @@ def extractor_page() -> None:
     bank_choice = st.selectbox("Banco / lector", ["Automático", "BTF", "Patagonia", "BBVA", "Comafi", "Macro", "Galicia", "HSBC", "Santander"])
     output_mode = st.selectbox(
         "Organización del resultado",
-        ["Un Excel completo", "Separar el Excel por año"],
+        ["Un Excel completo", "Separar el Excel por año", "Separar por bloques de meses"],
         help="La separación anual se realiza después de leer todo el PDF, sin cortar operaciones entre páginas.",
     )
+    months_per_file = 6
+    if output_mode == "Separar por bloques de meses":
+        months_per_file = st.number_input(
+            "Meses por archivo", min_value=1, max_value=12, value=6, step=1,
+            help="Ejemplo: 3 genera archivos trimestrales consecutivos; 6, semestrales.",
+        )
     uploaded = st.file_uploader("Seleccionar un extracto PDF", type=["pdf"], accept_multiple_files=False)
     upload_token = (uploaded.name, uploaded.size) if uploaded else None
     previous_token = st.session_state.get("active_upload")
@@ -1081,7 +1230,8 @@ def extractor_page() -> None:
                     dropna=False, as_index=False
                 ).agg(Acreditaciones=("Crédito", "size"), Total_acreditado=("Crédito", "sum")).sort_values("Total_acreditado", ascending=False)
                 st.session_state.result = (
-                    uploaded.name, bank, full, credits, grouped, monthly, rejected, output_mode
+                    uploaded.name, bank, full, credits, grouped, monthly, rejected,
+                    output_mode, int(months_per_file)
                 )
                 st.session_state.active_upload = upload_token
                 st.session_state.conversions_session += 1
@@ -1095,7 +1245,8 @@ def extractor_page() -> None:
         st.info("Subí un PDF. El documento y sus movimientos no se guardan en la base de usuarios.")
         academic_notice()
         return
-    _, bank, full, credits, grouped, monthly, rejected, output_mode = st.session_state.result
+    (_, bank, full, credits, grouped, monthly, rejected,
+     output_mode, months_per_file) = st.session_state.result
     if full.empty:
         st.info(
             "El extracto fue reconocido correctamente y no contiene movimientos en el período. "
@@ -1146,11 +1297,12 @@ def extractor_page() -> None:
         st.caption("El archivo se prepara únicamente cuando lo solicitás, para reducir el uso de memoria del servidor.")
         if st.button("Preparar archivos de descarga", type="primary", width="stretch"):
             with st.spinner("Generando Excel y CSV…"):
-                if output_mode == "Separar el Excel por año" and not full.empty:
+                if output_mode != "Un Excel completo" and not full.empty:
                     yearly_buffer = io.BytesIO()
                     with zipfile.ZipFile(yearly_buffer, "w", compression=zipfile.ZIP_DEFLATED) as yearly_zip:
-                        for year, year_rows in full.groupby("Año", sort=True):
-                            year_full, year_credits, year_monthly = analyze_movements(year_rows.copy())
+                        for period_name, period_rows in split_movement_periods(
+                                full, output_mode, int(months_per_file)):
+                            year_full, year_credits, year_monthly = analyze_movements(period_rows.copy())
                             year_grouped = year_credits.groupby(
                                 ["CUIT/DNI detectado", "Nombre/Procedencia detectada", "Procedencia", "Banco receptor"],
                                 dropna=False, as_index=False,
@@ -1158,12 +1310,13 @@ def extractor_page() -> None:
                                   Total_acreditado=("Crédito", "sum")).sort_values(
                                       "Total_acreditado", ascending=False)
                             yearly_zip.writestr(
-                                f"{bank.lower()}_{int(year)}_normalizado.xlsx",
+                                f"{bank.lower()}_{period_name}_normalizado.xlsx",
                                 export_workbook(bank, year_full, year_credits, year_grouped,
                                                 year_monthly, rejected),
                             )
                     download_file = yearly_buffer.getvalue()
-                    download_name = f"{bank.lower()}_normalizado_por_anio.zip"
+                    suffix = "por_anio" if output_mode == "Separar el Excel por año" else "por_periodos"
+                    download_name = f"{bank.lower()}_normalizado_{suffix}.zip"
                     download_mime = "application/zip"
                 else:
                     download_file = export_workbook(bank, full, credits, grouped, monthly, rejected)
