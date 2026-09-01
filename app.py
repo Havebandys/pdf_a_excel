@@ -727,8 +727,19 @@ def _balance_control(full: pd.DataFrame) -> pd.DataFrame:
     columns = ["Cuenta", "Saldo inicial", "Total créditos", "Total débitos",
                "Saldo final calculado", "Saldo final informado", "Diferencia",
                "Filas con diferencia", "Resultado"]
+    detected_accounts = [
+        str(account).strip() for account in full.attrs.get("accounts", [])
+        if str(account).strip() and str(account).strip() not in {"N/D", "nan", "None"}
+    ]
     if full.empty:
-        return pd.DataFrame(columns=columns)
+        return pd.DataFrame([
+            {"Cuenta": account, "Saldo inicial": None, "Total créditos": 0.0,
+             "Total débitos": 0.0, "Saldo final calculado": None,
+             "Saldo final informado": None, "Diferencia": None,
+             "Filas con diferencia": 0,
+             "Resultado": "SIN MOVIMIENTOS EN EL PERÍODO"}
+            for account in detected_accounts
+        ], columns=columns)
 
     work = full.copy()
     if "Cuenta" not in work.columns:
@@ -781,6 +792,17 @@ def _balance_control(full: pd.DataFrame) -> pd.DataFrame:
                         "Saldo final calculado": calculated_closing,
                         "Saldo final informado": informed_closing, "Diferencia": difference,
                         "Filas con diferencia": row_differences, "Resultado": result})
+    movement_accounts = {
+        str(account).strip() for account in work["Cuenta"].dropna().astype(str)
+    }
+    for account in detected_accounts:
+        if account not in movement_accounts:
+            results.append({"Cuenta": account, "Saldo inicial": None,
+                            "Total créditos": 0.0, "Total débitos": 0.0,
+                            "Saldo final calculado": None,
+                            "Saldo final informado": None, "Diferencia": None,
+                            "Filas con diferencia": 0,
+                            "Resultado": "SIN MOVIMIENTOS EN EL PERÍODO"})
     return pd.DataFrame(results, columns=columns)
 
 
@@ -803,16 +825,22 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
     output = io.BytesIO()
     balance_control = _balance_control(full)
     status = "Sin movimientos en el período" if full.empty else "Correcto"
-    accounts = full.attrs.get("accounts", [])
-    if not accounts and "Cuenta" in full.columns and not full.empty:
-        accounts = full["Cuenta"].dropna().astype(str).drop_duplicates().tolist()
+    accounts = [
+        str(account).strip() for account in full.attrs.get("accounts", [])
+        if str(account).strip() and str(account).strip() not in {"N/D", "nan", "None"}
+    ]
+    if "Cuenta" in full.columns and not full.empty:
+        for account in full["Cuenta"].dropna().astype(str):
+            account = account.strip()
+            if account and account not in {"N/D", "nan", "None"} and account not in accounts:
+                accounts.append(account)
     control = pd.DataFrame({
         "Control": ["Aplicación", "Finalidad", "Autoría", "Entorno", "Emisión", "Banco",
-                    "Estado", "Cuenta(s)", "Movimientos", "Acreditaciones",
+                    "Estado", "Cuentas detectadas", "Cuenta(s)", "Movimientos", "Acreditaciones",
                     "Total acreditado", "Filas a revisar"],
         "Resultado": [f"Extractor Bancario IA - {APP_VERSION}", "Uso exclusivamente educativo",
                       AUTHOR_CREDIT, "Emprendedurismo (IA) - Corrientes", period_label(), bank,
-                      status, ", ".join(accounts) if accounts else "N/D", len(full), len(credits),
+                      status, len(accounts), ", ".join(accounts) if accounts else "N/D", len(full), len(credits),
                       credits["Crédito"].sum(), len(rejected)],
     })
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -823,17 +851,28 @@ def export_workbook(bank: str, full: pd.DataFrame, credits: pd.DataFrame,
         control.to_excel(writer, sheet_name="Control", index=False)
         balance_control.to_excel(writer, sheet_name="Control de saldos", index=False)
         rejected.to_excel(writer, sheet_name="Revisar", index=False)
-        if "Cuenta" in full.columns:
+        if accounts:
             account_values = full["Cuenta"].fillna("").astype(str).str.strip().replace(
                 {"": "N/D", "nan": "N/D", "None": "N/D"}
-            )
-            if account_values.nunique(dropna=False) > 1:
-                used_names = {sheet.title for sheet in writer.book.worksheets}
-                for account in account_values.drop_duplicates():
-                    account_rows = full.loc[account_values.eq(account)].copy()
-                    account_rows.to_excel(
-                        writer, sheet_name=_account_sheet_name(account, used_names), index=False
-                    )
+            ) if "Cuenta" in full.columns else pd.Series(dtype="object")
+            used_names = {sheet.title for sheet in writer.book.worksheets}
+            for account in accounts:
+                account_rows = full.loc[account_values.eq(account)].copy()
+                # Keep the established compact output for a single active
+                # account, but always expose every account when there are
+                # several or when the account has no movements.
+                if len(accounts) > 1 or account_rows.empty:
+                    sheet_name = _account_sheet_name(account, used_names)
+                    if account_rows.empty:
+                        pd.DataFrame({
+                            "Cuenta": [account],
+                            "Estado": ["Sin movimientos en el período"],
+                            "Movimientos": [0],
+                            "Total créditos": [0.0],
+                            "Total débitos": [0.0],
+                        }).to_excel(writer, sheet_name=sheet_name, index=False)
+                    else:
+                        account_rows.to_excel(writer, sheet_name=sheet_name, index=False)
         for ws in writer.book.worksheets:
             ws.freeze_panes = "A2"
             ws.auto_filter.ref = ws.dimensions
