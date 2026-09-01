@@ -795,6 +795,8 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 page_rows, page_rejected = [], []
             rows.extend(page_rows)
             rejected.extend(page_rejected)
+            if state.get("account"):
+                state.setdefault("accounts", set()).add(str(state["account"]).strip())
             if progress and (page_no == total or page_no % 5 == 0):
                 progress(page_no, total)
             page.close()
@@ -802,6 +804,8 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 gc.collect()
     if bank == "Desconocido":
         rejected.append({"Página": None, "Texto": "", "Motivo": "Banco no reconocido"})
+    base_columns = ["Banco", "Fecha", "Operación", "Concepto", "Débito", "Crédito",
+                    "Saldo", "Origen", "Código trx", "Página", "Cuenta", "Mes"]
     frame = pd.DataFrame(rows)
     if not frame.empty:
         for column in ("Débito", "Crédito", "Saldo"):
@@ -813,4 +817,18 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
         )
         frame.insert(0, "Banco", bank)
         frame["Mes"] = frame["Fecha"].dt.to_period("M").astype(str)
+    else:
+        # A recognized statement with no transactions is a valid normalization,
+        # not a processing error.  Keep typed, stable columns so the application
+        # can still generate an auditable Excel workbook.
+        frame = pd.DataFrame({column: pd.Series(dtype="object") for column in base_columns})
+        frame["Fecha"] = pd.to_datetime(frame["Fecha"])
+        for column in ("Débito", "Crédito", "Saldo"):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame.attrs["accounts"] = sorted(
+        account for account in state.get("accounts", set()) if account
+    )
+    frame.attrs["status"] = (
+        "SIN MOVIMIENTOS EN EL PERÍODO" if frame.empty and bank != "Desconocido" else "OK"
+    )
     return bank, frame, pd.DataFrame(rejected)
