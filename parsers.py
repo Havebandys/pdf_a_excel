@@ -194,6 +194,13 @@ def _parse_column_page(page: str, bank: str, page_no: int, state: dict) -> tuple
         if "FECHA" in upper and "SALDO" in upper and ("DEBIT" in upper or "DÉBIT" in upper):
             active = True
             continue
+        # The BBVA page may include informative tables (for example,
+        # "Transferencias enviadas aceptadas") after the account statement.
+        # Their dated rows are not bank-account movements.  Stop consuming the
+        # current section as soon as its explicit total is reached.
+        if bank == "BBVA" and "TOTAL MOVIMIENTOS" in upper:
+            active = False
+            continue
         if not active:
             continue
         match = re.match(r"^\s*(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\s+", line)
@@ -214,10 +221,22 @@ def _parse_column_page(page: str, bank: str, page_no: int, state: dict) -> tuple
         first_amount = min((item.start() for item in money), default=len(line))
         concept_start = max(match.end(), pos.get("concept", match.end()))
         concept = line[concept_start:first_amount].strip()
+        origin = ""
+        if bank == "BBVA":
+            # In BBVA's extracted text the first concept character can appear
+            # 1-3 columns before the printed CONCEPTO header.  Start immediately
+            # after the date and remove only the actual origin marker used by
+            # this layout (D, optionally followed by its three-digit code).
+            movement_text = line[match.end():first_amount].strip()
+            origin_match = re.match(r"^D(?:\s+(\d{3}))?\s+(.*)$", movement_text, re.I)
+            if origin_match:
+                origin = "D" + (f" {origin_match.group(1)}" if origin_match.group(1) else "")
+                concept = origin_match.group(2).strip()
+            else:
+                concept = movement_text
         if bank == "Galicia" and pos.get("origin", -1) > concept_start:
             concept = line[concept_start:pos["origin"]].strip()
-        origin = ""
-        if pos.get("origin", -1) >= 0:
+        if bank != "BBVA" and pos.get("origin", -1) >= 0:
             origin = line[pos["origin"]:min(first_amount, pos["credit"])].strip()
         ref = ""
         if pos.get("ref", -1) >= 0:
