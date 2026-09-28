@@ -620,7 +620,7 @@ def auto_submit_pin(input_label: str, hidden_button_text: str) -> None:
         input.setAttribute('autocomplete', 'one-time-code');
 
         const check = () => {{
-          const clean = input.value.replace(/\D/g, '').slice(0, 4);
+          const clean = input.value.replace(/\\D/g, '').slice(0, 4);
           if (clean !== input.value) {{
             setNativeValue(input, clean);
             return;
@@ -689,41 +689,77 @@ def champions_banner() -> None:
     </div></div></div>""", unsafe_allow_html=True)
 
 
+def _pin_screen_css() -> None:
+    st.markdown("""
+    <style>
+    /* Acceso SNOOPY: limpio, centrado y sin textos técnicos */
+    .stApp { background: #020c14; }
+    .block-container { max-width: 760px; padding-top: 7vh; }
+    .pin-shell {
+        text-align:center; padding:34px 26px 18px; margin:0 auto 18px;
+    }
+    .pin-title {
+        font-family: Georgia, 'Times New Roman', serif; font-size:44px;
+        letter-spacing:9px; font-weight:700; color:#f4ffff;
+        text-shadow:0 0 18px rgba(76,232,218,.28); margin-bottom:4px;
+    }
+    .pin-subtitle {
+        color:#e9b85c; font-size:15px; font-weight:800; letter-spacing:6px;
+        margin-bottom:24px;
+    }
+    .pin-rule { height:1px; background:rgba(90,210,210,.16); max-width:360px; margin:0 auto 26px; }
+    .pin-label { color:#91a9b6; font-size:13px; margin-bottom:8px; }
+    div[data-testid="stTextInput"] { max-width:300px; margin-left:auto; margin-right:auto; }
+    div[data-testid="stTextInput"] label { display:none !important; }
+    div[data-testid="stTextInput"] input {
+        height:64px !important; border:1px solid #245064 !important; border-radius:12px !important;
+        background-color:#071b27 !important; color:#eaffff !important;
+        font-size:30px !important; font-weight:700 !important; text-align:center !important;
+        letter-spacing:31px !important; padding-left:31px !important;
+        caret-color:#58e5dc !important; box-shadow:none !important;
+    }
+    div[data-testid="stTextInput"] input:focus {
+        border-color:#54e3d9 !important; box-shadow:0 0 0 1px #54e3d9, 0 0 18px rgba(84,227,217,.12) !important;
+    }
+    div[data-testid="stAlert"] { max-width:300px; margin:10px auto 0; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 def gateway_screen() -> None:
     if st.session_state.pop("_clear_gateway_pin", False):
         st.session_state["gateway_pin"] = ""
 
-    st.markdown('<span class="snoopy-login-page"></span>', unsafe_allow_html=True)
+    _pin_screen_css()
     st.markdown("""
-    <div class="snoopy-login-brand">
-      <div class="snoopy-login-name">SNOOPY <span>IA</span></div>
+    <div class="pin-shell">
+      <div class="pin-title">SNOOPY</div>
+      <div class="pin-subtitle">PAMPERO</div>
+      <div class="pin-rule"></div>
+      <div class="pin-label">Código de acceso</div>
     </div>
     """, unsafe_allow_html=True)
-    left, center, right = st.columns([1.15, 1, 1.15], gap="large")
-    with center:
-        with st.container(border=True):
-            st.markdown('<span class="snoopy-login-card"></span>', unsafe_allow_html=True)
-            with st.form("snoopy_gateway_form", clear_on_submit=False):
-                gateway_pin = st.text_input(
-                    "PIN", type="password", max_chars=4, key="gateway_pin",
-                    placeholder="••••"
-                )
-                submitted = st.form_submit_button("__AUTO_GATEWAY__")
-            auto_submit_pin("PIN", "__AUTO_GATEWAY__")
 
-            if st.session_state.pop("_gateway_error", False):
-                st.error("Acceso no habilitado.")
+    with st.form("snoopy_gateway_form", clear_on_submit=False):
+        gateway_pin = st.text_input(
+            "PIN", type="password", max_chars=4, key="gateway_pin",
+            placeholder=""
+        )
+        submitted = st.form_submit_button("__AUTO_GATEWAY__")
+    auto_submit_pin("PIN", "__AUTO_GATEWAY__")
 
-            if submitted:
-                authorized = verify_gateway_pin(gateway_pin)
-                log_access("(gateway)", authorized, "GATEWAY_ACCESS")
-                if authorized:
-                    st.session_state["snoopy_gateway_passed"] = True
-                    st.rerun()
-                else:
-                    st.session_state["_gateway_error"] = True
-                    st.session_state["_clear_gateway_pin"] = True
-                    st.rerun()
+    if st.session_state.pop("_gateway_error", False):
+        st.error("PIN incorrecto.")
+
+    if submitted:
+        authorized = verify_gateway_pin(gateway_pin)
+        log_access("(gateway)", authorized, "GATEWAY_ACCESS")
+        if authorized:
+            st.session_state["snoopy_gateway_passed"] = True
+            st.rerun()
+        st.session_state["_gateway_error"] = True
+        st.session_state["_clear_gateway_pin"] = True
+        st.rerun()
 
 
 def login_screen() -> None:
@@ -734,64 +770,48 @@ def login_screen() -> None:
     if st.session_state.pop("_clear_login_pin", False):
         st.session_state["login_pin"] = ""
 
-    hero("Sistema inteligente de normalización bancaria", show_author=False)
-    st.markdown(f"""<div class="status-grid">
-      <div class="status-card"><div class="status-label">Cobertura</div><div class="status-value">8 entidades bancarias</div><div class="status-note">Lectores normalizados</div></div>
-      <div class="status-card"><div class="status-label">Privacidad</div><div class="status-value">Procesamiento temporal</div><div class="status-note">Los PDF no se almacenan</div></div>
-      <div class="status-card"><div class="status-label">Robustez</div><div class="status-value">PDF de gran volumen</div><div class="status-note">Procesamiento página por página</div></div>
-      <div class="status-card"><div class="status-label">Fiabilidad</div><div class="status-value">Salida normalizada</div><div class="status-note">Excel, CSV y control de filas</div></div>
-    </div>""", unsafe_allow_html=True)
-    visual, center, legal = st.columns(3, gap="medium")
-    with visual:
-        excel_preview()
-    with center:
-        with st.container(border=True):
-            st.markdown('<span class="login-marker"></span>', unsafe_allow_html=True)
-            st.markdown('<div class="login-kicker">Acceso seguro · Control de usuarios</div>', unsafe_allow_html=True)
-            st.subheader("Ingreso de usuarios")
+    _pin_screen_css()
+    st.markdown("""
+    <div class="pin-shell">
+      <div class="pin-title">SNOOPY</div>
+      <div class="pin-subtitle">USUARIO</div>
+      <div class="pin-rule"></div>
+    </div>
+    """, unsafe_allow_html=True)
 
-            username = st.text_input("Usuario", key="login_username").strip().lower()
-            must_accept = acceptance_required(username)
-            accepted = True
-            if must_accept:
-                accepted = st.checkbox(
-                    "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso.",
-                    key="login_acceptance"
-                )
-                st.caption("Esta confirmación se solicita al primer ingreso, cada 10 accesos o después de cambiar el PIN.")
+    username = st.text_input("Usuario", key="login_username", placeholder="Usuario").strip().lower()
+    must_accept = acceptance_required(username)
+    accepted = True
+    if must_accept:
+        accepted = st.checkbox(
+            "Acepto las condiciones de uso.", key="login_acceptance"
+        )
 
-            with st.form("snoopy_user_login_form", clear_on_submit=False):
-                pin = st.text_input(
-                    "PIN de usuario", type="password", max_chars=4, key="login_pin",
-                    placeholder="••••"
-                )
-                submitted = st.form_submit_button(
-                    "__AUTO_LOGIN__", disabled=not accepted
-                )
-            auto_submit_pin("PIN de usuario", "__AUTO_LOGIN__")
+    st.markdown('<div class="pin-label" style="text-align:center;margin-top:12px">PIN</div>', unsafe_allow_html=True)
+    with st.form("snoopy_user_login_form", clear_on_submit=False):
+        pin = st.text_input(
+            "PIN de usuario", type="password", max_chars=4, key="login_pin",
+            placeholder=""
+        )
+        submitted = st.form_submit_button("__AUTO_LOGIN__", disabled=not accepted)
+    auto_submit_pin("PIN de usuario", "__AUTO_LOGIN__")
 
-            if st.session_state.pop("_login_error", False):
-                st.error("Datos de acceso incorrectos.")
+    if st.session_state.pop("_login_error", False):
+        st.error("Datos incorrectos.")
 
-            if submitted:
-                try:
-                    user = authenticate(username, pin)
-                    if user:
-                        if must_accept:
-                            log_access(username, True, "TERMS_ACCEPTED")
-                        st.session_state.user = user
-                        st.rerun()
-                    else:
-                        st.session_state["_login_error"] = True
-                        st.session_state["_clear_login_pin"] = True
-                        st.rerun()
-                except Exception:
-                    st.session_state["_login_error"] = True
-                    st.session_state["_clear_login_pin"] = True
-                    st.rerun()
-    with legal:
-        side_disclaimer()
-    champions_banner()
+    if submitted:
+        try:
+            user = authenticate(username, pin)
+            if user:
+                if must_accept:
+                    log_access(username, True, "TERMS_ACCEPTED")
+                st.session_state.user = user
+                st.rerun()
+        except Exception:
+            pass
+        st.session_state["_login_error"] = True
+        st.session_state["_clear_login_pin"] = True
+        st.rerun()
 
 
 def classify_origin(text: str) -> str:
