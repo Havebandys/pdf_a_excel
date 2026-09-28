@@ -531,9 +531,20 @@ def _gateway_account_exists() -> bool:
 
 
 def verify_gateway_pin(pin: str) -> bool:
-    """Valida el PIN universal sin revelar si falló el PIN, la cuenta o la base."""
+    """Valida el PIN universal de 4 dígitos."""
     if not valid_pin(pin):
         return False
+
+    # PIN inicial simple: 9915. Si existe SNOOPY_GATEWAY_PIN en Secrets, usa ese valor.
+    try:
+        configured_pin = str(st.secrets.get(GATEWAY_SECRET, "9915")).strip()
+    except Exception:
+        configured_pin = "9915"
+
+    if valid_pin(configured_pin) and pin == configured_pin:
+        return True
+
+    # Si el administrador ya creó/cambió el PIN universal en la base, también se acepta.
     try:
         if _gateway_account_exists():
             result = db().rpc("verify_app_user", {
@@ -541,14 +552,9 @@ def verify_gateway_pin(pin: str) -> bool:
             }).execute()
             return bool(result.data or [])
     except Exception:
-        return False
+        pass
 
-    # Bootstrap seguro: el PIN inicial vive en Secrets, nunca en GitHub.
-    try:
-        bootstrap_pin = str(st.secrets.get(GATEWAY_SECRET, ""))
-    except Exception:
-        bootstrap_pin = ""
-    return valid_pin(bootstrap_pin) and hashlib.sha256(pin.encode()).digest() == hashlib.sha256(bootstrap_pin.encode()).digest()
+    return False
 
 
 def set_gateway_pin(pin: str) -> None:
