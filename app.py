@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from openpyxl.styles import Font, PatternFill
 from supabase import Client, create_client
 
@@ -22,6 +23,8 @@ from parsers import parse_pdf
 APP_VERSION = "Snoopy IA"
 AUTHOR = "@PamperoSur"
 AUTHOR_CREDIT = "X: @PamperoSur · CAF"
+GATEWAY_USER = "snoopy_gateway"
+GATEWAY_SECRET = "SNOOPY_GATEWAY_PIN"
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 MONTHS = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -453,7 +456,7 @@ def log_access(username: str, success: bool, event_type: str = "LOGIN") -> None:
 
 
 def acceptance_required(username: str) -> bool:
-    """Exige aceptación inicial, cada 10 ingresos y después de cambiar la clave."""
+    """Exige aceptación inicial, cada 10 ingresos y después de cambiar el PIN."""
     normalized = username.lower().strip()
     if not normalized:
         return True
@@ -471,7 +474,7 @@ def acceptance_required(username: str) -> bool:
             created = str(row.get("created_at") or "")
             if event == "TERMS_ACCEPTED" and accepted_at is None:
                 accepted_at = created
-            elif event == "PASSWORD_RESET" and password_reset_at is None:
+            elif event in {"PASSWORD_RESET", "PIN_RESET"} and password_reset_at is None:
                 password_reset_at = created
             elif event == "LOGIN" and bool(row.get("success")):
                 if accepted_at is None or created > accepted_at:
@@ -490,8 +493,11 @@ def register_page_open() -> None:
         st.session_state._page_open_logged = True
 
 
-def authenticate(username: str, password: str):
-    result = db().rpc("verify_app_user", {"p_username": username, "p_password": password}).execute()
+def authenticate(username: str, pin: str):
+    if not re.fullmatch(r"\d{4}", str(pin or "")):
+        log_access(username, False)
+        return None
+    result = db().rpc("verify_app_user", {"p_username": username, "p_password": pin}).execute()
     rows = result.data or []
     if rows:
         log_access(username, True)
@@ -511,25 +517,123 @@ def authenticate(username: str, password: str):
     return None
 
 
-def gateway_user_authorized(username: str) -> bool:
-    """Comprueba silenciosamente que el usuario exista y esté habilitado."""
-    normalized = username.lower().strip()
-    if not normalized:
-        return False
+def valid_pin(pin: str) -> bool:
+    return bool(re.fullmatch(r"\d{4}", str(pin or "")))
+
+
+def _gateway_account_exists() -> bool:
     try:
-        rows = (db().table("app_users")
-                .select("username,active,status,archived")
-                .eq("username", normalized)
-                .limit(1).execute().data or [])
-        if not rows:
-            return False
-        account = rows[0]
-        status = str(account.get("status") or "active").lower().strip()
-        blocked_states = {"blocked", "archived", "disabled", "paused", "inactive"}
-        return bool(account.get("active", False)) and not bool(account.get("archived", False)) \
-            and status not in blocked_states
+        rows = (db().table("app_users").select("username")
+                .eq("username", GATEWAY_USER).limit(1).execute().data or [])
+        return bool(rows)
     except Exception:
         return False
+
+
+def verify_gateway_pin(pin: str) -> bool:
+    """Valida el PIN universal sin revelar si falló el PIN, la cuenta o la base."""
+    if not valid_pin(pin):
+        return False
+    try:
+        if _gateway_account_exists():
+            result = db().rpc("verify_app_user", {
+                "p_username": GATEWAY_USER, "p_password": pin
+            }).execute()
+            return bool(result.data or [])
+    except Exception:
+        return False
+
+    # Bootstrap seguro: el PIN inicial vive en Secrets, nunca en GitHub.
+    try:
+        bootstrap_pin = str(st.secrets.get(GATEWAY_SECRET, ""))
+    except Exception:
+        bootstrap_pin = ""
+    return valid_pin(bootstrap_pin) and hashlib.sha256(pin.encode()).digest() == hashlib.sha256(bootstrap_pin.encode()).digest()
+
+
+def set_gateway_pin(pin: str) -> None:
+    """Crea o cambia el PIN universal usando la infraestructura de usuarios existente."""
+    if not valid_pin(pin):
+        raise ValueError("El PIN debe tener exactamente 4 dígitos.")
+    if _gateway_account_exists():
+        db().rpc("reset_app_password", {
+            "p_username": GATEWAY_USER, "p_new_password": pin
+        }).execute()
+        db().table("app_users").update({
+            "active": True, "status": "active", "archived": False,
+            "must_change_password": False, "password_changed_at": now_ar().isoformat()
+        }).eq("username", GATEWAY_USER).execute()
+    else:
+        db().rpc("create_app_user", {
+            "p_username": GATEWAY_USER,
+            "p_full_name": "Acceso universal SNOOPY",
+            "p_password": pin,
+            "p_role": "Analista",
+            "p_created_by": st.session_state.user["username"],
+        }).execute()
+        db().table("app_users").update({
+            "active": True, "status": "active", "archived": False,
+            "must_change_password": False, "password_changed_at": now_ar().isoformat()
+        }).eq("username", GATEWAY_USER).execute()
+
+
+def auto_submit_pin(input_label: str, hidden_button_text: str) -> None:
+    """Oculta el submit y lo dispara al escribir el cuarto dígito."""
+    label_js = input_label.replace("\\", "\\\\").replace("'", "\\'")
+    button_js = hidden_button_text.replace("\\", "\\\\").replace("'", "\\'")
+    components.html(f"""
+    <script>
+    (() => {{
+      const label = '{label_js}';
+      const buttonText = '{button_js}';
+      const doc = window.parent.document;
+
+      function setNativeValue(element, value) {{
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(element, value);
+        element.dispatchEvent(new Event('input', {{ bubbles: true }}));
+      }}
+
+      function wire() {{
+        const input = [...doc.querySelectorAll('input')].find(
+          el => el.getAttribute('aria-label') === label
+        );
+        const button = [...doc.querySelectorAll('button')].find(
+          el => (el.innerText || '').trim() === buttonText
+        );
+        if (button) {{
+          const wrapper = button.closest('[data-testid="stFormSubmitButton"]');
+          if (wrapper) wrapper.style.display = 'none';
+          else button.style.display = 'none';
+        }}
+        if (!input || !button || input.dataset.snoopyAutoPin === '1') return;
+
+        input.dataset.snoopyAutoPin = '1';
+        input.setAttribute('inputmode', 'numeric');
+        input.setAttribute('pattern', '[0-9]*');
+        input.setAttribute('autocomplete', 'one-time-code');
+
+        const check = () => {{
+          const clean = input.value.replace(/\D/g, '').slice(0, 4);
+          if (clean !== input.value) {{
+            setNativeValue(input, clean);
+            return;
+          }}
+          if (clean.length === 4 && !button.disabled) {{
+            setTimeout(() => button.click(), 35);
+          }}
+        }};
+        input.addEventListener('input', check);
+        input.addEventListener('paste', () => setTimeout(check, 0));
+        check();
+      }}
+
+      wire();
+      const timer = setInterval(wire, 250);
+      setTimeout(() => clearInterval(timer), 12000);
+    }})();
+    </script>
+    """, height=0, width=0)
 
 
 def academic_notice() -> None:
@@ -580,6 +684,9 @@ def champions_banner() -> None:
 
 
 def gateway_screen() -> None:
+    if st.session_state.pop("_clear_gateway_pin", False):
+        st.session_state["gateway_pin"] = ""
+
     st.markdown('<span class="snoopy-login-page"></span>', unsafe_allow_html=True)
     st.markdown("""
     <div class="snoopy-login-brand">
@@ -591,24 +698,35 @@ def gateway_screen() -> None:
         with st.container(border=True):
             st.markdown('<span class="snoopy-login-card"></span>', unsafe_allow_html=True)
             with st.form("snoopy_gateway_form", clear_on_submit=False):
-                gateway_username = st.text_input("Usuario autorizado", key="gateway_username")
-                submitted = st.form_submit_button("Continuar", type="primary", width="stretch")
+                gateway_pin = st.text_input(
+                    "PIN", type="password", max_chars=4, key="gateway_pin",
+                    placeholder="••••"
+                )
+                submitted = st.form_submit_button("__AUTO_GATEWAY__")
+            auto_submit_pin("PIN", "__AUTO_GATEWAY__")
+
+            if st.session_state.pop("_gateway_error", False):
+                st.error("Acceso no habilitado.")
+
             if submitted:
-                normalized = gateway_username.lower().strip()
-                authorized = gateway_user_authorized(normalized)
-                log_access(normalized or "(vacío)", authorized, "GATEWAY_ACCESS")
+                authorized = verify_gateway_pin(gateway_pin)
+                log_access("(gateway)", authorized, "GATEWAY_ACCESS")
                 if authorized:
                     st.session_state["snoopy_gateway_passed"] = True
-                    st.session_state["snoopy_gateway_username"] = normalized
                     st.rerun()
                 else:
-                    st.error("Acceso no habilitado.")
+                    st.session_state["_gateway_error"] = True
+                    st.session_state["_clear_gateway_pin"] = True
+                    st.rerun()
 
 
 def login_screen() -> None:
     if not st.session_state.get("snoopy_gateway_passed", False):
         gateway_screen()
         return
+
+    if st.session_state.pop("_clear_login_pin", False):
+        st.session_state["login_pin"] = ""
 
     hero("Sistema inteligente de normalización bancaria", show_author=False)
     st.markdown(f"""<div class="status-grid">
@@ -625,27 +743,46 @@ def login_screen() -> None:
             st.markdown('<span class="login-marker"></span>', unsafe_allow_html=True)
             st.markdown('<div class="login-kicker">Acceso seguro · Control de usuarios</div>', unsafe_allow_html=True)
             st.subheader("Ingreso de usuarios")
-            username = st.text_input("Usuario").strip().lower()
-            password = st.text_input("Clave", type="password")
+
+            username = st.text_input("Usuario", key="login_username").strip().lower()
             must_accept = acceptance_required(username)
             accepted = True
             if must_accept:
                 accepted = st.checkbox(
-                    "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso."
+                    "He leído y acepto el uso exclusivamente educativo, el descargo de responsabilidad y el registro de acceso.",
+                    key="login_acceptance"
                 )
-                st.caption("Esta confirmación se solicita al primer ingreso, cada 10 accesos o después de cambiar la clave.")
-            if st.button("Ingresar", type="primary", width="stretch", disabled=not accepted):
+                st.caption("Esta confirmación se solicita al primer ingreso, cada 10 accesos o después de cambiar el PIN.")
+
+            with st.form("snoopy_user_login_form", clear_on_submit=False):
+                pin = st.text_input(
+                    "PIN de usuario", type="password", max_chars=4, key="login_pin",
+                    placeholder="••••"
+                )
+                submitted = st.form_submit_button(
+                    "__AUTO_LOGIN__", disabled=not accepted
+                )
+            auto_submit_pin("PIN de usuario", "__AUTO_LOGIN__")
+
+            if st.session_state.pop("_login_error", False):
+                st.error("Datos de acceso incorrectos.")
+
+            if submitted:
                 try:
-                    user = authenticate(username, password)
+                    user = authenticate(username, pin)
                     if user:
                         if must_accept:
                             log_access(username, True, "TERMS_ACCEPTED")
                         st.session_state.user = user
                         st.rerun()
                     else:
-                        st.error("Usuario, clave o estado incorrecto.")
-                except Exception as exc:
-                    st.error(f"No fue posible conectar con la base de usuarios: {exc}")
+                        st.session_state["_login_error"] = True
+                        st.session_state["_clear_login_pin"] = True
+                        st.rerun()
+                except Exception:
+                    st.session_state["_login_error"] = True
+                    st.session_state["_clear_login_pin"] = True
+                    st.rerun()
     with legal:
         side_disclaimer()
     champions_banner()
@@ -1474,38 +1611,68 @@ def extractor_page() -> None:
 def admin_users_page() -> None:
     st.title("Administración de usuarios")
     st.caption("Disponible exclusivamente para Administradores.")
+
+    with st.expander("PIN universal de acceso", expanded=False):
+        st.caption("Es el primer PIN de 4 dígitos que habilita la pantalla de usuarios.")
+        c1, c2 = st.columns(2)
+        gateway_new_pin = c1.text_input(
+            "Nuevo PIN universal", type="password", max_chars=4, key="admin_gateway_pin"
+        )
+        gateway_confirmation = c2.text_input(
+            "Repetir PIN universal", type="password", max_chars=4, key="admin_gateway_pin_repeat"
+        )
+        if st.button("Cambiar PIN universal", type="primary", width="stretch"):
+            if not valid_pin(gateway_new_pin):
+                st.error("El PIN debe tener exactamente 4 dígitos.")
+            elif gateway_new_pin != gateway_confirmation:
+                st.error("Los PIN ingresados no coinciden.")
+            else:
+                try:
+                    set_gateway_pin(gateway_new_pin)
+                    log_access(st.session_state.user["username"], True, "GATEWAY_PIN_CHANGED")
+                    st.success("PIN universal actualizado.")
+                except Exception:
+                    st.error("No fue posible actualizar el PIN universal.")
+
     with st.expander("Crear usuario", expanded=True):
         with st.form("create_user", clear_on_submit=True):
             c1, c2 = st.columns(2)
             username = c1.text_input("Usuario").strip().lower()
             full_name = c2.text_input("Nombre completo").strip()
-            password = c1.text_input("Clave inicial", type="password")
+            pin = c1.text_input("PIN inicial", type="password", max_chars=4)
             role = c2.selectbox("Rol", ["Analista", "Administrador"])
             if st.form_submit_button("Crear usuario", type="primary", width="stretch"):
-                try:
-                    db().rpc("create_app_user", {"p_username": username, "p_full_name": full_name,
-                                                  "p_password": password, "p_role": role,
-                                                  "p_created_by": st.session_state.user["username"]}).execute()
-                    st.success(f"Usuario {username} creado.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"No se pudo crear: {exc}")
+                if not valid_pin(pin):
+                    st.error("El PIN debe tener exactamente 4 dígitos.")
+                else:
+                    try:
+                        db().rpc("create_app_user", {"p_username": username, "p_full_name": full_name,
+                                                      "p_password": pin, "p_role": role,
+                                                      "p_created_by": st.session_state.user["username"]}).execute()
+                        st.success(f"Usuario {username} creado.")
+                        st.rerun()
+                    except Exception:
+                        st.error("No se pudo crear el usuario.")
+
     users = db().table("app_users").select(
         "username,full_name,role,active,status,archived,created_at,created_by,last_login,access_count,password_changed_at,must_change_password"
     ).order("username").execute().data or []
+    users = [u for u in users if str(u.get("username") or "").lower() != GATEWAY_USER]
+
     user_df = pd.DataFrame(users).rename(columns={
         "username": "Usuario", "full_name": "Nombre completo", "role": "Rol", "active": "Activo",
         "created_at": "Creado", "created_by": "Creado por", "last_login": "Último ingreso",
         "access_count": "Cantidad de accesos", "status": "Estado", "archived": "Archivado",
-        "password_changed_at": "Último cambio de clave", "must_change_password": "Cambio obligatorio"})
+        "password_changed_at": "Último cambio de PIN", "must_change_password": "Cambio obligatorio"})
     if not user_df.empty:
         user_df["Creado"] = user_df["Creado"].map(datetime_ar)
         user_df["Último ingreso"] = user_df["Último ingreso"].map(datetime_ar)
-        user_df["Antigüedad clave"] = user_df["Último cambio de clave"].map(
+        user_df["Antigüedad PIN"] = user_df["Último cambio de PIN"].map(
             lambda value: f"{password_age_days(value)} días" if password_age_days(value) is not None else "N/D"
         )
-        user_df["Último cambio de clave"] = user_df["Último cambio de clave"].map(datetime_ar)
+        user_df["Último cambio de PIN"] = user_df["Último cambio de PIN"].map(datetime_ar)
     st.dataframe(user_df, hide_index=True, width="stretch")
+
     editable = [u["username"] for u in users if u["username"] != "adm" and not u.get("archived", False)]
     if editable:
         st.markdown("#### Modificar usuario")
@@ -1514,14 +1681,22 @@ def admin_users_page() -> None:
         new_role = c1.selectbox("Nuevo rol", ["Analista", "Administrador"], key="new_role")
         if c1.button("Cambiar rol", width="stretch"):
             db().table("app_users").update({"role": new_role}).eq("username", target).execute(); st.rerun()
-        new_password = c2.text_input("Nueva clave", type="password")
-        if c2.button("Restablecer clave", width="stretch", disabled=not new_password):
-            db().rpc("reset_app_password", {"p_username": target, "p_new_password": new_password}).execute()
-            db().table("app_users").update({
-                "password_changed_at": now_ar().isoformat(), "must_change_password": True
-            }).eq("username", target).execute()
-            log_access(target, True, "PASSWORD_RESET")
-            st.success("Clave temporal asignada. En el próximo ingreso deberá aceptar el descargo y crear una clave personal.")
+
+        new_pin = c2.text_input("Nuevo PIN", type="password", max_chars=4)
+        if c2.button("Restablecer PIN", width="stretch", disabled=not new_pin):
+            if not valid_pin(new_pin):
+                st.error("El PIN debe tener exactamente 4 dígitos.")
+            else:
+                try:
+                    db().rpc("reset_app_password", {"p_username": target, "p_new_password": new_pin}).execute()
+                    db().table("app_users").update({
+                        "password_changed_at": now_ar().isoformat(), "must_change_password": True
+                    }).eq("username", target).execute()
+                    log_access(target, True, "PIN_RESET")
+                    st.success("PIN temporal asignado. En el próximo ingreso deberá aceptar el descargo y crear un PIN personal.")
+                except Exception:
+                    st.error("No fue posible restablecer el PIN.")
+
         selected = next(u for u in users if u["username"] == target)
         if c3.button("Pausar" if selected["active"] else "Reactivar", width="stretch"):
             new_active = not selected["active"]
@@ -1538,36 +1713,36 @@ def admin_users_page() -> None:
 
 
 def password_page(forced: bool = False) -> None:
-    st.title("Crear nueva clave" if forced else "Cambiar mi clave")
+    st.title("Crear nuevo PIN" if forced else "Cambiar mi PIN")
     if forced:
-        st.warning("La clave utilizada es temporal. Para continuar debés crear una clave personal.")
+        st.warning("El PIN utilizado es temporal. Para continuar debés crear un PIN personal de 4 dígitos.")
     else:
-        st.caption("La nueva clave reemplazará inmediatamente la clave actual.")
-    with st.form("change_own_password", clear_on_submit=True):
-        new_password = st.text_input("Nueva clave", type="password")
-        confirmation = st.text_input("Repetir nueva clave", type="password")
-        submitted = st.form_submit_button("Guardar nueva clave", type="primary", width="stretch")
+        st.caption("El nuevo PIN reemplazará inmediatamente el PIN actual.")
+    with st.form("change_own_pin", clear_on_submit=True):
+        new_pin = st.text_input("Nuevo PIN", type="password", max_chars=4)
+        confirmation = st.text_input("Repetir nuevo PIN", type="password", max_chars=4)
+        submitted = st.form_submit_button("Guardar nuevo PIN", type="primary", width="stretch")
         if submitted:
-            if len(new_password) < 8:
-                st.error("La nueva clave debe tener al menos 8 caracteres.")
-            elif new_password != confirmation:
-                st.error("Las claves ingresadas no coinciden.")
+            if not valid_pin(new_pin):
+                st.error("El PIN debe tener exactamente 4 dígitos.")
+            elif new_pin != confirmation:
+                st.error("Los PIN ingresados no coinciden.")
             else:
                 username = st.session_state.user["username"]
                 try:
                     db().rpc("reset_app_password", {
-                        "p_username": username, "p_new_password": new_password
+                        "p_username": username, "p_new_password": new_pin
                     }).execute()
                     db().table("app_users").update({
                         "password_changed_at": now_ar().isoformat(), "must_change_password": False
                     }).eq("username", username).execute()
-                    log_access(username, True, "PASSWORD_CHANGED")
+                    log_access(username, True, "PIN_CHANGED")
                     st.session_state.user["must_change_password"] = False
                     st.session_state.user["password_changed_at"] = now_ar().isoformat()
-                    st.success("Clave personal guardada correctamente.")
+                    st.success("PIN personal guardado correctamente.")
                     st.rerun()
-                except Exception as exc:
-                    st.error(f"No se pudo actualizar la clave: {exc}")
+                except Exception:
+                    st.error("No se pudo actualizar el PIN.")
 
 
 def all_event_rows(event_type: str, batch_size: int = 1000) -> list[dict]:
@@ -1591,6 +1766,7 @@ def management_page() -> None:
     users = db().table("app_users").select(
         "username,full_name,role,active,status,archived,access_count,last_login,password_changed_at"
     ).order("username").execute().data or []
+    users = [u for u in users if str(u.get("username") or "").lower() != GATEWAY_USER]
     pdf_rows = all_event_rows("PDF_PROCESSED")
     pdf_counts = pd.Series([str(row.get("username") or "").lower() for row in pdf_rows]).value_counts()
     total_pdfs = int(len(pdf_rows))
@@ -1609,7 +1785,7 @@ def management_page() -> None:
             "PDF por ingreso": round(pdfs / accesses, 2) if accesses else 0.0,
             "% de PDF totales": round((pdfs / total_pdfs) * 100, 1) if total_pdfs else 0.0,
             "Último ingreso": datetime_ar(item.get("last_login")),
-            "Antigüedad clave": password_age_days(item.get("password_changed_at")),
+            "Antigüedad PIN": password_age_days(item.get("password_changed_at")),
         })
     frame = pd.DataFrame(records)
     active_users = int((frame["Estado"] == "Activo").sum()) if not frame.empty else 0
@@ -1627,7 +1803,7 @@ def management_page() -> None:
         "% de PDF totales": st.column_config.ProgressColumn(
             "% de PDF totales", min_value=0.0, max_value=100.0, format="%.1f%%"
         ),
-        "Antigüedad clave": st.column_config.NumberColumn("Días desde cambio", format="%d días")
+        "Antigüedad PIN": st.column_config.NumberColumn("Días desde cambio", format="%d días")
     })
     st.caption("PDF por ingreso = PDF procesados / ingresos totales. El porcentaje representa la participación de cada usuario sobre todos los PDF registrados.")
 
@@ -1700,11 +1876,11 @@ with st.sidebar:
     st.caption(f"{user['full_name']} · {user['role']}")
     age_days = password_age_days(user.get("password_changed_at"))
     if age_days is not None and age_days >= 90:
-        st.warning(f"Tu clave tiene {age_days} días. Se recomienda actualizarla.")
+        st.warning(f"Tu PIN tiene {age_days} días. Se recomienda actualizarlo.")
     pages = ["Extractor"]
     if user["role"] == "Administrador":
         pages += ["Gestión", "Usuarios", "Auditoría"]
-    pages += ["Mi clave"]
+    pages += ["Mi PIN"]
     page = st.radio("Navegación", pages)
     st.divider()
     st.caption(f"Último acceso: {datetime_ar(user.get('last_login'))} · Argentina")
@@ -1715,7 +1891,7 @@ with st.sidebar:
 
 if page == "Extractor":
     extractor_page()
-elif page == "Mi clave":
+elif page == "Mi PIN":
     password_page()
 elif page == "Gestión":
     management_page()
