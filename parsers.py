@@ -84,9 +84,11 @@ def detect_bank(text: str) -> str:
         return "Santander"
     if "FECHATRX" in top and "IMPORTEMO" in top and "SALDO_PROMEDIO" in top:
         return "Macro"
-    # Formato alternativo de extractos Macro. Se mantiene separado del parser Macro original.
-    if ("FECHADESCRIPCION" in top and "DEBITOS" in top and "CREDITOS" in top and "SALDO" in top
-            and ("CUENTACORRIENTEBANCARIA" in top or "CUENTACORRIENTEESPECIAL" in top)):
+    # Macro Variado: extractos con columnas FECHA/DESCRIPCION/REF/DEBITOS/CREDITOS/SALDO.
+    # Se mantiene separado del formato Macro histórico para no alterar su parser.
+    if (("CUENTACORRIENTEBANCARIA" in top or "CUENTACORRIENTEESPECIAL" in top)
+            and "DEBITOS" in top and "CREDITOS" in top and "SALDO" in top
+            and ("PERIODO" in top or "PERÍODO" in text[:30000].upper())):
         return "Macro Variado"
     if "BANCOGALICIA" in top or "RESUMENDECUENTACORRIENTEENPESOS" in top:
         return "Galicia"
@@ -115,7 +117,6 @@ def detect_bank(text: str) -> str:
 def _account(page: str, bank: str, previous: str = "") -> str:
     patterns = {
         "Macro": r"^\s*\d{1,2}/\d{1,2}/\d{4}\s+(\d{10,})",
-        "Macro Variado": r"CUENTA\s+CORRIENTE(?:\s+(?:BANCARIA|ESPECIAL))?(?:\s+EN\s+(?:PESOS|DOLARES))?\s+(?:N[º°]|NRO\.?|N[ÚU]MERO)?\s*[:.]?\s*([\d-]{8,})",
         "Galicia": r"(?:N[ÚU]MERO DE CUENTA|CUENTA:)\s*(?:N[°º]\s*)?([\d-]+)",
         "BBVA": r"CC\s*\$\s*([\d-]+/\d)",
         "HSBC": r"CUENTA CORRIENTE EN \$ NRO\.\s*([\d-]+)",
@@ -359,111 +360,69 @@ def _parse_macro_page_object(page, page_no: int, state: dict) -> tuple[list[dict
 
 
 
-def _macro_variado_number(value: str) -> float | None:
-    """Importes Macro alternativos: 1.234,56 o 1,234.56."""
-    value = value.strip().replace("$", "").replace(" ", "")
-    if not re.fullmatch(r"-?[\d.,]+", value):
-        return None
-    try:
-        if "," in value and "." in value:
-            if value.rfind(",") > value.rfind("."):
-                value = value.replace(".", "").replace(",", ".")
-            else:
-                value = value.replace(",", "")
-        elif "," in value:
-            parts = value.split(",")
-            value = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) == 2 else "".join(parts)
-        elif value.count(".") > 1:
-            parts = value.split(".")
-            value = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) == 2 else "".join(parts)
-        return float(value)
-    except ValueError:
-        return None
-
-
 def _parse_macro_variado_page_object(page, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
-    """Formato alternativo Macro: FECHA / DESCRIPCION / REF. / DEBITOS / CREDITOS / SALDO."""
+    """Macro alternativo. Lee por coordenadas sin modificar el parser Macro histórico."""
     rows, rejected = [], []
-    words = page.extract_words(x_tolerance=1.5, y_tolerance=2, keep_blank_chars=False) or []
     plain = page.extract_text() or ""
-    state["account"] = _account(plain, "Macro Variado", state.get("account", ""))
+    account_match = re.search(
+        r"CUENTA\s+CORRIENTE\s+(?:BANCARIA|ESPECIAL(?:\s+EN\s+(?:PESOS|DOLARES|DÓLARES))?)\s+"
+        r"(?:NRO\.?|N[º°])\s*:?\s*([\d-]+)", plain, re.I)
+    if account_match:
+        state["account"] = account_match.group(1)
 
-    # Agrupar por renglón visual. Elegimos el encabezado de MOVIMIENTOS, no el resumen superior.
-    visual_rows = []
-    for w in sorted(words, key=lambda z: (z["top"], z["x0"])):
-        target = next((r for r in reversed(visual_rows[-3:]) if abs(r[0]["top"] - w["top"]) <= 2.5), None)
-        if target is None:
-            target = []
-            visual_rows.append(target)
-        target.append(w)
-
-    headers = None
-    for line_words in visual_rows:
-        keys = [re.sub(r"[^A-Z]", "", w["text"].upper()) for w in line_words]
-        joined = " ".join(keys)
-        if "FECHA" in keys and any(k.startswith("DESCRIP") for k in keys) and "DEBITOS" in joined and "CREDITOS" in joined and "SALDO" in keys:
-            h = {}
-            for w, key in zip(line_words, keys):
-                center = (w["x0"] + w["x1"]) / 2
-                if key.startswith("DEBIT"):
-                    h["debit"] = center
-                elif key.startswith("CREDIT"):
-                    h["credit"] = center
-                elif key == "SALDO":
-                    h["balance"] = center
-                elif key.startswith("REF"):
-                    h["ref"] = center
-            if {"debit", "credit", "balance"}.issubset(h):
-                headers = h
+    words = page.extract_words()
+    # Buscar el encabezado real de movimientos (no el resumen SALDO INICIAL...).
+    headers = {}
+    header_top = None
+    for w in words:
+        t = w["text"].upper()
+        if t == "FECHA":
+            same = [z for z in words if abs(z["top"] - w["top"]) < 2.5]
+            labels = {z["text"].upper().rstrip("."): z for z in same}
+            if "DEBITOS" in labels and "CREDITOS" in labels and "SALDO" in labels:
+                headers = labels
+                header_top = w["top"]
                 break
-    if not headers:
+    if header_top is None:
         return rows, rejected
 
-    date_re = re.compile(r"^\d{1,2}/\d{1,2}/(?:\d{2}|\d{4})$")
-    money_cols = ("debit", "credit", "balance")
-    # La tolerancia depende de la separación real entre columnas y evita capturar REFERENCIA.
-    sep = min(abs(headers["credit"] - headers["debit"]), abs(headers["balance"] - headers["credit"]))
-    tolerance = max(24.0, sep * 0.48)
+    debit_x = headers["DEBITOS"]["x0"]
+    credit_x = headers["CREDITOS"]["x0"]
+    balance_x = headers["SALDO"]["x0"]
+    ref_word = headers.get("REFERENCIA") or headers.get("REF")
+    ref_x = ref_word["x0"] if ref_word else (debit_x - 70)
+    money_re = re.compile(r"^(?:\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-?$")
+    date_re = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}$")
 
-    for line_words in visual_rows:
-        line_words.sort(key=lambda z: z["x0"])
-        if not line_words or not date_re.match(line_words[0]["text"]):
+    for dw in words:
+        if dw["top"] <= header_top + 3 or not date_re.match(dw["text"]):
             continue
-        if len(line_words) < 3:
+        same = sorted([z for z in words if abs(z["top"] - dw["top"]) < 2.5], key=lambda z: z["x0"])
+        # Evita fechas de notas/pies: una fila de movimiento debe tener importe a la derecha de referencia.
+        amounts = [z for z in same if z["x0"] > ref_x and money_re.match(z["text"])]
+        if not amounts:
             continue
-        try:
-            date_value = _date(line_words[0]["text"])
-        except Exception:
-            continue
-
         debit = credit = balance = None
-        amount_words = []
-        for w in line_words[1:]:
-            value = _macro_variado_number(w["text"])
-            if value is None:
-                continue
-            x = (w["x0"] + w["x1"]) / 2
-            nearest = min(money_cols, key=lambda k: abs(x - headers[k]))
-            if abs(x - headers[nearest]) <= tolerance:
-                if nearest == "debit":
-                    debit = abs(value)
-                elif nearest == "credit":
-                    credit = abs(value)
-                else:
-                    balance = value
-                amount_words.append(w)
-
+        for a in amounts:
+            center = (a["x0"] + a["x1"]) / 2
+            # Clasificación por columna física impresa.
+            targets = {"debit": debit_x, "credit": credit_x, "balance": balance_x}
+            kind = min(targets, key=lambda k: abs(center - targets[k]))
+            val = ar_number(a["text"]) if "," in a["text"] and a["text"].rfind(",") > a["text"].rfind(".") else us_number(a["text"])
+            if kind == "debit": debit = val
+            elif kind == "credit": credit = val
+            else: balance = val
+        # Texto descriptivo y referencia por posiciones, sin inferir signo por concepto.
+        concept_words = [z["text"] for z in same if z["x0"] > dw["x1"] and z["x0"] < ref_x]
+        ref_words = [z["text"] for z in same if z["x0"] >= ref_x and z["x0"] < debit_x and not money_re.match(z["text"])]
         if debit is None and credit is None:
+            rejected.append({"Página": page_no, "Texto": " ".join(z["text"] for z in same),
+                             "Motivo": "Macro Variado: importe fuera de columnas débito/crédito"})
             continue
-
-        # Descripción termina antes de REF.; referencia se conserva como Operación.
-        ref_x = headers.get("ref", headers["debit"] - sep)
-        desc_words = [w for w in line_words[1:] if w["x1"] < ref_x - 3]
-        ref_words = [w for w in line_words[1:] if w["x0"] >= ref_x - tolerance and w["x1"] < headers["debit"] - tolerance * 0.35 and w not in amount_words]
-        concept = re.sub(r"\s+", " ", " ".join(w["text"] for w in desc_words)).strip()
-        operation = re.sub(r"\s+", " ", " ".join(w["text"] for w in ref_words)).strip()
-        rows.append({"Fecha": date_value, "Operación": operation, "Concepto": concept,
-                     "Débito": debit, "Crédito": credit, "Saldo": balance,
+        concept = re.sub(r"\s+", " ", " ".join(concept_words)).strip()
+        rows.append({"Fecha": _date(dw["text"]), "Operación": " ".join(ref_words).strip(),
+                     "Concepto": concept, "Débito": abs(debit) if debit is not None else None,
+                     "Crédito": abs(credit) if credit is not None else None, "Saldo": balance,
                      "Origen": "", "Código trx": "", "Página": page_no,
                      "Cuenta": state.get("account", "")})
     return rows, rejected
