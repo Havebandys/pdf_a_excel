@@ -82,10 +82,12 @@ def detect_bank(text: str) -> str:
     top = re.sub(r"\s+", "", text[:30000].upper())
     if "RESUMENDECUENTA" in top and ("BANCOSANTANDERARGENTINA" in top or "SANTANDER" in top):
         return "Santander"
-    if ("FECHATRX" in top and "IMPORTEMO" in top and "SALDO_PROMEDIO" in top) or (
-            "FECHADESCRIPCION" in top and "DEBITOS" in top and "CREDITOS" in top and
-            ("CUENTACORRIENTEBANCARIA" in top or "CUENTACORRIENTEESPECIAL" in top)):
+    if "FECHATRX" in top and "IMPORTEMO" in top and "SALDO_PROMEDIO" in top:
         return "Macro"
+    # Formato alternativo de extractos Macro. Se mantiene separado del parser Macro original.
+    if ("FECHADESCRIPCION" in top and "DEBITOS" in top and "CREDITOS" in top and "SALDO" in top
+            and ("CUENTACORRIENTEBANCARIA" in top or "CUENTACORRIENTEESPECIAL" in top)):
+        return "Macro Variado"
     if "BANCOGALICIA" in top or "RESUMENDECUENTACORRIENTEENPESOS" in top:
         return "Galicia"
     if "EXTRACTODEL" in top and "ESTIMADOSSE" in top and "REFERENCIA" in top:
@@ -112,7 +114,8 @@ def detect_bank(text: str) -> str:
 
 def _account(page: str, bank: str, previous: str = "") -> str:
     patterns = {
-        "Macro": r"CUENTA\s+CORRIENTE(?:\s+ESPECIAL)?(?:\s+EN\s+(?:PESOS|DOLARES))?\s+(?:N[º°]|NRO\.?|N[ÚU]MERO)?\s*[:.]?\s*([\d-]{8,})",
+        "Macro": r"^\s*\d{1,2}/\d{1,2}/\d{4}\s+(\d{10,})",
+        "Macro Variado": r"CUENTA\s+CORRIENTE(?:\s+(?:BANCARIA|ESPECIAL))?(?:\s+EN\s+(?:PESOS|DOLARES))?\s+(?:N[º°]|NRO\.?|N[ÚU]MERO)?\s*[:.]?\s*([\d-]{8,})",
         "Galicia": r"(?:N[ÚU]MERO DE CUENTA|CUENTA:)\s*(?:N[°º]\s*)?([\d-]+)",
         "BBVA": r"CC\s*\$\s*([\d-]+/\d)",
         "HSBC": r"CUENTA CORRIENTE EN \$ NRO\.\s*([\d-]+)",
@@ -310,121 +313,8 @@ def _parse_macro_page(page: str, page_no: int, state: dict) -> tuple[list[dict],
     return rows, rejected
 
 
-def _macro_number(value: str) -> float | None:
-    """Parse Macro amounts in either 1,234.56 or 1.234,56 notation."""
-    value = value.strip().replace("$", "").replace(" ", "")
-    if not re.fullmatch(r"-?[\d.,]+", value):
-        return None
-    try:
-        if "," in value and "." in value:
-            if value.rfind(",") > value.rfind("."):
-                value = value.replace(".", "").replace(",", ".")
-            else:
-                value = value.replace(",", "")
-        elif "," in value:
-            parts = value.split(",")
-            value = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) == 2 else "".join(parts)
-        elif value.count(".") > 1:
-            parts = value.split(".")
-            value = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) == 2 else "".join(parts)
-        return float(value)
-    except ValueError:
-        return None
-
-
-def _parse_macro_statement_page_object(page, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
-    """Parse the standard Banco Macro statement layout (FECHA/DESCRIPCION/REF./DEBITOS/CREDITOS/SALDO)."""
-    rows, rejected = [], []
-    words = page.extract_words(x_tolerance=1.5, y_tolerance=2, keep_blank_chars=False) or []
-    plain = page.extract_text() or ""
-    state["account"] = _account(plain, "Macro", state.get("account", ""))
-
-    # Locate the printed column headings; using physical x positions prevents a
-    # reference number from being mistaken for a debit/credit amount.
-    headers = {}
-    for w in words:
-        key = re.sub(r"[^A-Z]", "", w["text"].upper())
-        if key.startswith("DEBIT") and "debit" not in headers:
-            headers["debit"] = (w["x0"] + w["x1"]) / 2
-        elif key.startswith("CREDIT") and "credit" not in headers:
-            headers["credit"] = (w["x0"] + w["x1"]) / 2
-        elif key == "SALDO" and "balance" not in headers:
-            headers["balance"] = (w["x0"] + w["x1"]) / 2
-    if not {"debit", "credit", "balance"}.issubset(headers):
-        return rows, rejected
-
-    # Group words into visual rows.
-    visual_rows = []
-    for w in sorted(words, key=lambda z: (z["top"], z["x0"])):
-        target = next((r for r in reversed(visual_rows[-3:]) if abs(r[0]["top"] - w["top"]) <= 2.5), None)
-        if target is None:
-            target = []
-            visual_rows.append(target)
-        target.append(w)
-
-    date_re = re.compile(r"^\d{1,2}/\d{1,2}/(?:\d{2}|\d{4})$")
-    for line_words in visual_rows:
-        line_words.sort(key=lambda z: z["x0"])
-        if not line_words or not date_re.match(line_words[0]["text"]):
-            continue
-        date_text = line_words[0]["text"]
-        # Ignore period/header dates that are not movement rows.
-        if len(line_words) < 3:
-            continue
-        try:
-            date_value = _date(date_text)
-        except Exception:
-            rejected.append({"Página": page_no, "Texto": " ".join(w["text"] for w in line_words),
-                             "Motivo": "Fecha Macro no reconocida"})
-            continue
-
-        debit = credit = balance = None
-        amount_words = []
-        for w in line_words[1:]:
-            value = _macro_number(w["text"])
-            if value is None:
-                continue
-            x = (w["x0"] + w["x1"]) / 2
-            # Assign only values physically located in the monetary columns.
-            nearest = min(("debit", "credit", "balance"), key=lambda k: abs(x - headers[k]))
-            # Wide tolerance handles both old and new Macro statement templates.
-            if abs(x - headers[nearest]) <= max(42, page.width * 0.075):
-                if nearest == "debit": debit = abs(value)
-                elif nearest == "credit": credit = abs(value)
-                else: balance = value
-                amount_words.append(w)
-
-        # A movement must carry at least debit or credit. Daily/final-balance
-        # lines are intentionally excluded from transaction output.
-        if debit is None and credit is None:
-            continue
-
-        first_money_x = min((w["x0"] for w in amount_words), default=headers["debit"])
-        body_words = [w for w in line_words[1:] if w["x0"] < first_money_x and w not in amount_words]
-        body = re.sub(r"\s+", " ", " ".join(w["text"] for w in body_words)).strip()
-        # Macro prints REF. immediately before the debit column. Preserve it as
-        # Operación when the last token is a numeric reference.
-        operation = ""
-        concept = body
-        ref_match = re.match(r"^(.*?)(?:\s+)(\d{1,10})$", body)
-        if ref_match:
-            concept = ref_match.group(1).strip()
-            operation = ref_match.group(2)
-        rows.append({"Fecha": date_value, "Operación": operation, "Concepto": concept,
-                     "Débito": debit, "Crédito": credit, "Saldo": balance,
-                     "Origen": "", "Código trx": "", "Página": page_no,
-                     "Cuenta": state.get("account", "")})
-    return rows, rejected
-
-
 def _parse_macro_page_object(page, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
-    """Read both known Banco Macro statement families without affecting other banks."""
-    plain = page.extract_text() or ""
-    normalized = re.sub(r"\s+", "", plain.upper())
-    if ("FECHADESCRIPCION" in normalized and "DEBITOS" in normalized and "CREDITOS" in normalized):
-        return _parse_macro_statement_page_object(page, page_no, state)
-
-    # Legacy Macro format: FECHA TRX / IMPORTE MO / SALDO_PROMEDIO.
+    """Reads Macro by physical x-columns because amount and reference touch in its text layer."""
     rows, rejected = [], []
     date_words = [word for word in page.extract_words() if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", word["text"])]
     for word in date_words:
@@ -467,6 +357,116 @@ def _parse_macro_page_object(page, page_no: int, state: dict) -> tuple[list[dict
                      "Cuenta": meta_match.group(2)})
     return rows, rejected
 
+
+
+def _macro_variado_number(value: str) -> float | None:
+    """Importes Macro alternativos: 1.234,56 o 1,234.56."""
+    value = value.strip().replace("$", "").replace(" ", "")
+    if not re.fullmatch(r"-?[\d.,]+", value):
+        return None
+    try:
+        if "," in value and "." in value:
+            if value.rfind(",") > value.rfind("."):
+                value = value.replace(".", "").replace(",", ".")
+            else:
+                value = value.replace(",", "")
+        elif "," in value:
+            parts = value.split(",")
+            value = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) == 2 else "".join(parts)
+        elif value.count(".") > 1:
+            parts = value.split(".")
+            value = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) == 2 else "".join(parts)
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _parse_macro_variado_page_object(page, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
+    """Formato alternativo Macro: FECHA / DESCRIPCION / REF. / DEBITOS / CREDITOS / SALDO."""
+    rows, rejected = [], []
+    words = page.extract_words(x_tolerance=1.5, y_tolerance=2, keep_blank_chars=False) or []
+    plain = page.extract_text() or ""
+    state["account"] = _account(plain, "Macro Variado", state.get("account", ""))
+
+    # Agrupar por renglón visual. Elegimos el encabezado de MOVIMIENTOS, no el resumen superior.
+    visual_rows = []
+    for w in sorted(words, key=lambda z: (z["top"], z["x0"])):
+        target = next((r for r in reversed(visual_rows[-3:]) if abs(r[0]["top"] - w["top"]) <= 2.5), None)
+        if target is None:
+            target = []
+            visual_rows.append(target)
+        target.append(w)
+
+    headers = None
+    for line_words in visual_rows:
+        keys = [re.sub(r"[^A-Z]", "", w["text"].upper()) for w in line_words]
+        joined = " ".join(keys)
+        if "FECHA" in keys and any(k.startswith("DESCRIP") for k in keys) and "DEBITOS" in joined and "CREDITOS" in joined and "SALDO" in keys:
+            h = {}
+            for w, key in zip(line_words, keys):
+                center = (w["x0"] + w["x1"]) / 2
+                if key.startswith("DEBIT"):
+                    h["debit"] = center
+                elif key.startswith("CREDIT"):
+                    h["credit"] = center
+                elif key == "SALDO":
+                    h["balance"] = center
+                elif key.startswith("REF"):
+                    h["ref"] = center
+            if {"debit", "credit", "balance"}.issubset(h):
+                headers = h
+                break
+    if not headers:
+        return rows, rejected
+
+    date_re = re.compile(r"^\d{1,2}/\d{1,2}/(?:\d{2}|\d{4})$")
+    money_cols = ("debit", "credit", "balance")
+    # La tolerancia depende de la separación real entre columnas y evita capturar REFERENCIA.
+    sep = min(abs(headers["credit"] - headers["debit"]), abs(headers["balance"] - headers["credit"]))
+    tolerance = max(24.0, sep * 0.48)
+
+    for line_words in visual_rows:
+        line_words.sort(key=lambda z: z["x0"])
+        if not line_words or not date_re.match(line_words[0]["text"]):
+            continue
+        if len(line_words) < 3:
+            continue
+        try:
+            date_value = _date(line_words[0]["text"])
+        except Exception:
+            continue
+
+        debit = credit = balance = None
+        amount_words = []
+        for w in line_words[1:]:
+            value = _macro_variado_number(w["text"])
+            if value is None:
+                continue
+            x = (w["x0"] + w["x1"]) / 2
+            nearest = min(money_cols, key=lambda k: abs(x - headers[k]))
+            if abs(x - headers[nearest]) <= tolerance:
+                if nearest == "debit":
+                    debit = abs(value)
+                elif nearest == "credit":
+                    credit = abs(value)
+                else:
+                    balance = value
+                amount_words.append(w)
+
+        if debit is None and credit is None:
+            continue
+
+        # Descripción termina antes de REF.; referencia se conserva como Operación.
+        ref_x = headers.get("ref", headers["debit"] - sep)
+        desc_words = [w for w in line_words[1:] if w["x1"] < ref_x - 3]
+        ref_words = [w for w in line_words[1:] if w["x0"] >= ref_x - tolerance and w["x1"] < headers["debit"] - tolerance * 0.35 and w not in amount_words]
+        concept = re.sub(r"\s+", " ", " ".join(w["text"] for w in desc_words)).strip()
+        operation = re.sub(r"\s+", " ", " ".join(w["text"] for w in ref_words)).strip()
+        rows.append({"Fecha": date_value, "Operación": operation, "Concepto": concept,
+                     "Débito": debit, "Crédito": credit, "Saldo": balance,
+                     "Origen": "", "Código trx": "", "Página": page_no,
+                     "Cuenta": state.get("account", "")})
+    return rows, rejected
 
 def _parse_hsbc_page(page: str, page_no: int, state: dict) -> tuple[list[dict], list[dict]]:
     rows, rejected = [], []
@@ -947,7 +947,10 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
         parsers = {"BTF": _parse_btf_page, "Macro": _parse_macro_page, "HSBC": _parse_hsbc_page,
                    "Comafi": _parse_comafi_page, "Santander": _parse_santander_page}
         for page_no, page in enumerate(pdf.pages, 1):
-            if bank == "Macro":
+            if bank == "Macro Variado":
+                text = ""
+                page_rows, page_rejected = _parse_macro_variado_page_object(page, page_no, state)
+            elif bank == "Macro":
                 text = ""
                 page_rows, page_rejected = _parse_macro_page_object(page, page_no, state)
             elif bank == "Comafi":
@@ -960,7 +963,7 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 text = page.extract_text(layout=True, x_density=7.25, y_density=13) or ""
             if bank in {"Patagonia", "BBVA"}:
                 page_rows, page_rejected = _parse_column_page(text, bank, page_no, state)
-            elif bank not in {"Galicia", "Macro", "Comafi"} and bank in parsers:
+            elif bank not in {"Galicia", "Macro", "Macro Variado", "Comafi"} and bank in parsers:
                 if bank == "BTF" and "LIQUIDACION DE PRESENTACION DE CUPONES" in text.upper():
                     page_rows, page_rejected = _parse_btf_liquidation_page(text, page_no, state)
                 else:
@@ -968,7 +971,7 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 if bank == "Santander" and not page_rows:
                     plain_text = page.extract_text() or ""
                     page_rows, page_rejected = _parse_santander_plain_page(plain_text, page_no, state)
-            elif bank not in {"Galicia", "Macro", "Comafi"}:
+            elif bank not in {"Galicia", "Macro", "Macro Variado", "Comafi"}:
                 page_rows, page_rejected = [], []
             rows.extend(page_rows)
             rejected.extend(page_rejected)
