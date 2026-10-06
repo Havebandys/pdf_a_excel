@@ -90,6 +90,11 @@ def detect_bank(text: str) -> str:
             and "DEBITOS" in top and "CREDITOS" in top and "SALDO" in top
             and ("PERIODO" in top or "PERÍODO" in text[:30000].upper())):
         return "Macro Variado"
+    # Macro Respuesta: nota/carta del banco que enumera cuentas y remite a resúmenes adjuntos.
+    # Se reconoce como documento Macro válido, pero NO se inventan movimientos.
+    if ("MACRO.COM.AR" in text[:30000].upper() and "EN RESPUESTA AL REQUERIMIENTO" in text[:30000].upper()
+            and ("SE ADJUNTA" in text[:30000].upper() or "REGISTRA COMO TITULAR" in text[:30000].upper())):
+        return "Macro Respuesta"
     if "BANCOGALICIA" in top or "RESUMENDECUENTACORRIENTEENPESOS" in top:
         return "Galicia"
     if "EXTRACTODEL" in top and "ESTIMADOSSE" in top and "REFERENCIA" in top:
@@ -918,11 +923,14 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
             elif bank == "Galicia":
                 text = page.extract_text() or ""
                 page_rows, page_rejected = _parse_galicia_page(text, page_no, state)
+            elif bank == "Macro Respuesta":
+                text = page.extract_text() or ""
+                page_rows, page_rejected = [], []
             else:
                 text = page.extract_text(layout=True, x_density=7.25, y_density=13) or ""
             if bank in {"Patagonia", "BBVA"}:
                 page_rows, page_rejected = _parse_column_page(text, bank, page_no, state)
-            elif bank not in {"Galicia", "Macro", "Macro Variado", "Comafi"} and bank in parsers:
+            elif bank not in {"Galicia", "Macro", "Macro Variado", "Macro Respuesta", "Comafi"} and bank in parsers:
                 if bank == "BTF" and "LIQUIDACION DE PRESENTACION DE CUPONES" in text.upper():
                     page_rows, page_rejected = _parse_btf_liquidation_page(text, page_no, state)
                 else:
@@ -930,7 +938,7 @@ def parse_pdf(pdf_bytes: bytes, forced_bank: str | None = None,
                 if bank == "Santander" and not page_rows:
                     plain_text = page.extract_text() or ""
                     page_rows, page_rejected = _parse_santander_plain_page(plain_text, page_no, state)
-            elif bank not in {"Galicia", "Macro", "Macro Variado", "Comafi"}:
+            elif bank not in {"Galicia", "Macro", "Macro Variado", "Macro Respuesta", "Comafi"}:
                 page_rows, page_rejected = [], []
             rows.extend(page_rows)
             rejected.extend(page_rejected)
