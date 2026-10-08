@@ -376,27 +376,32 @@ def _parse_macro_variado_page_object(page, page_no: int, state: dict) -> tuple[l
         state["account"] = account_match.group(1)
 
     words = page.extract_words()
-    # Buscar el encabezado real de movimientos (no el resumen SALDO INICIAL...).
+    # Las páginas de continuación no repiten el encabezado: conservar las columnas.
     headers = {}
     header_top = None
     for w in words:
-        t = w["text"].upper()
-        if t == "FECHA":
+        if w["text"].upper() == "FECHA":
             same = [z for z in words if abs(z["top"] - w["top"]) < 2.5]
             labels = {z["text"].upper().rstrip("."): z for z in same}
-            if "DEBITOS" in labels and "CREDITOS" in labels and "SALDO" in labels:
+            if all(k in labels for k in ("DEBITOS", "CREDITOS", "SALDO")):
                 headers = labels
                 header_top = w["top"]
                 break
-    if header_top is None:
+    if headers:
+        debit_x = headers["DEBITOS"]["x0"]
+        credit_x = headers["CREDITOS"]["x0"]
+        balance_x = headers["SALDO"]["x0"]
+        ref_word = headers.get("REFERENCIA") or headers.get("REF")
+        ref_x = ref_word["x0"] if ref_word else debit_x - 70
+        state["macro_variado_columns"] = (debit_x, credit_x, balance_x, ref_x)
+    elif "macro_variado_columns" in state:
+        debit_x, credit_x, balance_x, ref_x = state["macro_variado_columns"]
+        header_top = -1
+    else:
         return rows, rejected
 
-    debit_x = headers["DEBITOS"]["x0"]
-    credit_x = headers["CREDITOS"]["x0"]
-    balance_x = headers["SALDO"]["x0"]
-    ref_word = headers.get("REFERENCIA") or headers.get("REF")
-    ref_x = ref_word["x0"] if ref_word else (debit_x - 70)
-    money_re = re.compile(r"^(?:\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-?$")
+    # Admitir saldos con signo inicial o final (ej.: -1.075.785,94).
+    money_re = re.compile(r"^-?(?:\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-?$")
     date_re = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}$")
 
     for dw in words:
