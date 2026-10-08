@@ -401,6 +401,7 @@ def _parse_macro_variado_page_object(page, page_no: int, state: dict) -> tuple[l
         return rows, rejected
 
     # Admitir saldos con signo inicial o final (ej.: -1.075.785,94).
+    # Si el PDF no imprime saldo por movimiento, no inventar uno.
     money_re = re.compile(r"^-?(?:\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})-?$")
     date_re = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}$")
 
